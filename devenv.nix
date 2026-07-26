@@ -2,6 +2,12 @@
   pkgs,
   ...
 }:
+let
+  projectRoot = builtins.toString ./.;
+  migrationDir = "migration";
+  serverDir = ./server;
+  entityDir = "./src/entities";
+in
 {
   # https://devenv.sh/packages/
   packages = with pkgs; [
@@ -24,11 +30,24 @@
   };
 
   env = {
-    DATABASE_URL = "sqlite://db.sqlite?mode=rwc";
+    DATABASE_URL = "sqlite://${projectRoot}/db.sqlite?mode=rwc";
   };
 
   # https://devenv.sh/processes/
-  # processes.dev.exec = "${lib.getExe pkgs.watchexec} -n -- ls -la";
+  processes = {
+    "server" = {
+      exec = "cargo run";
+      cwd = builtins.toString serverDir;
+      watch = {
+        paths = [
+          ./server
+        ];
+        ignore = [
+          "**/target/**"
+        ];
+      };
+    };
+  };
 
   # https://devenv.sh/services/
   # services.postgres.enable = true;
@@ -52,11 +71,29 @@
     git --version # Use packages
   '';
 
-  # https://devenv.sh/tasks/
-  # tasks = {
-  #   "myproj:setup".exec = "mytool build";
-  #   "devenv:enterShell".after = [ "myproj:setup" ];
-  # };
+  tasks = {
+    "server:migrate" = {
+      exec = "sea-orm-cli migrate";
+    };
+    "server:clean-server" = {
+      exec = "mkdir -p ./server";
+    };
+    "server:generate-entities" = {
+      exec = "sea-orm-cli generate entity -o ${entityDir} --seaography";
+      after = [
+        "server:migrate"
+        "server:clean-server"
+      ];
+      cwd = builtins.toString serverDir;
+    };
+    "server:generate-server" = {
+      exec = ''
+        seaography-cli -o . -e ${entityDir} --framework axum server
+      '';
+      after = [ "server:generate-entities" ];
+      cwd = builtins.toString serverDir;
+    };
+  };
 
   # https://devenv.sh/tests/
   enterTest = ''
