@@ -8,7 +8,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m2false260726_true94625_create_todo_event_type"
+        "m20260726_194625_create_todo_event_type"
     }
 }
 
@@ -66,8 +66,9 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 
-    async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-        todo!();
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table("todo_event_type").to_owned())
+            .await
     }
 }

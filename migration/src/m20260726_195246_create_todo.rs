@@ -48,7 +48,10 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table("todo")
                     .if_not_exists()
-                    .col(pk_auto("id").not_null())
+                    // Plain INTEGER PRIMARY KEY (no AUTOINCREMENT) per schema.sql;
+                    // reuse-on-delete is fine here, unlike todo_event's sync cursor.
+                    .col(integer("id").primary_key().not_null())
+                    .col(string("public_id").not_null().unique_key())
                     .col(string("kind").not_null())
                     .foreign_key(
                         ForeignKey::create()
@@ -69,7 +72,8 @@ impl MigrationTrait for Migration {
                     .check(Expr::cust("length(trim(title)) > 0"))
                     .col(string("description").not_null().default(""))
                     .col(integer("priority").not_null().default(0))
-                    .col(date("due_on"))
+                    .col(date_null("due_on"))
+                    .check(Expr::cust("due_on IS NULL OR due_on IS date(due_on)"))
                     .col(
                         enumeration_null("source", "source", vec!["local", "linear"])
                             .not_null()
@@ -92,9 +96,9 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
-                    .col(timestamp("started_at"))
-                    .col(timestamp("closed_at"))
-                    .col(timestamp("archived_at"))
+                    .col(timestamp_null("started_at"))
+                    .col(timestamp_null("closed_at"))
+                    .col(timestamp_null("archived_at"))
                     .to_owned(),
             )
             .await?;
