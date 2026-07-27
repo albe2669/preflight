@@ -24,14 +24,7 @@ impl MigrationTrait for Migration {
                         enumeration(
                             "state_type",
                             "state_type",
-                            vec![
-                                "triage",
-                                "backlog",
-                                "unstarted",
-                                "started",
-                                "completed",
-                                "canceled",
-                            ],
+                            vec!["triage", "backlog", "unstarted", "started", "canceled"],
                         )
                         .primary_key()
                         .not_null(),
@@ -53,7 +46,6 @@ impl MigrationTrait for Migration {
             ("backlog", "todo"),
             ("unstarted", "todo"),
             ("started", "started"),
-            ("completed", "completed"),
             ("canceled", "cancelled"),
         ];
 

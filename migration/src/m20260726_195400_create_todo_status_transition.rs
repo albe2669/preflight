@@ -47,16 +47,13 @@ impl MigrationTrait for Migration {
             ("todo", "cancelled"),
             ("started", "blocked"),
             ("started", "done"),
-            ("started", "completed"),
             ("started", "cancelled"),
             ("started", "todo"),
             ("blocked", "started"),
             ("blocked", "todo"),
             ("blocked", "cancelled"),
-            ("done", "completed"),
             ("done", "started"),
             ("done", "cancelled"),
-            ("completed", "started"),
             ("cancelled", "todo"),
         ];
 
