@@ -4,9 +4,9 @@
 }:
 let
   projectRoot = builtins.toString ./.;
-  migrationDir = "migration";
+  migrationDir = "crates/migration";
   serverDir = ./server;
-  entityDir = "./src/entities";
+  entityDir = "crates/entity/src";
 in
 {
   # https://devenv.sh/packages/
@@ -73,22 +73,17 @@ in
 
   tasks = {
     "server:migrate" = {
-      exec = "sea-orm-cli migrate";
-    };
-    "server:clean-server" = {
-      exec = "mkdir -p ./server";
+      exec = "sea-orm-cli migrate -d ${migrationDir}";
     };
     "server:generate-entities" = {
-      exec = "sea-orm-cli generate entity -o ${entityDir} --seaography";
+      exec = "sea-orm-cli generate entity -o ${entityDir} --with-serde both --model-extra-derives 'async_graphql::SimpleObject' --seaography";
       after = [
         "server:migrate"
-        "server:clean-server"
       ];
-      cwd = builtins.toString serverDir;
     };
     "server:generate-server" = {
       exec = ''
-        seaography-cli -o . -e ${entityDir} --framework axum server
+        seaography-cli -o crates/graphql -e ${entityDir} --framework axum graphql
       '';
       after = [ "server:generate-entities" ];
       cwd = builtins.toString serverDir;

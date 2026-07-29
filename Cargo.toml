@@ -1,5 +1,4 @@
 [workspace]
-members = [
-  "migration",
-  "server"
+members = ["crates/entity", "crates/graphql",
+  "crates/migration",
 ]
