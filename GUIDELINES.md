@@ -509,6 +509,14 @@ Git hooks (via devenv): `rustfmt` on commit, `clippy` on commit.
 
 CI runs `fmt --check`, `clippy`, `cargo test` (units), `cargo test --features integration`, `cargo test --features e2e`, in that order.
 
+## Comments
+
+- Comments are the exception, not the rule. Add one only when the code cannot be made self-explanatory and the *why* is non-obvious; never write a comment that restates *what* the code does.
+- Never include in a comment where the code is used. Comments like "called by `foo()`" or "used in `bar.rs`" are noise. The compiler and IDE can answer that question.
+- For exported symbols, follow the language's doc-comment convention but only when the comment adds information beyond the identifier's name, and keep it to one sentence.
+- Prefer extracting a well-named helper over writing a comment to explain a block.
+- Extra comments a human wouldn't write: doc comments that restate the identifier name, comments narrating obvious code, per-field/per-constant annotations, section-divider banners, or TODO/FIXME markers without an owner and an actionable next step. Comments inconsistent with the rest of the file are equally bad.
+
 ## Conformity checklist
 
 Before finishing any task, verify:
