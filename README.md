@@ -27,7 +27,7 @@ preflight/
 │   │   ├── review.rs          # daily review (planned, touched, completed, carriedOver)
 │   │   └── error.rs
 │   ├── sync/src/              # one-way pullers (stub bodies, real upserts)
-│   │   ├── linear.rs  github.rs  cursor.rs
+│   │   ├── linear.rs  github.rs  cursor.rs  error.rs
 │   ├── graphql/src/           # Seaography queries + hand-written mutations
 │   │   ├── lib.rs  query_root.rs  query.rs  types.rs
 │   │   └── mutation/          # todo.rs  day_plan.rs  tags.rs  convert.rs  sync.rs
@@ -38,6 +38,13 @@ preflight/
 The rule that keeps the event log honest: **`graphql` never touches `entity`
 for writes.** Every mutation goes through `core`, and every `core` write
 appends to `todo_event` in the same transaction.
+
+Every service is a **producer-side trait** (`core::TodoService`,
+`core::DayPlanService`, …) with a private impl and a `pub fn new(db, clock)
+-> impl Trait` constructor. `server/main` constructs each silo, wraps it in
+`Arc<dyn Trait>`, and injects it into the GraphQL schema — the only place
+concrete implementations meet. `sync` is independent: it owns its own
+`SyncError` and does not depend on `core`.
 
 ## The four decisions
 
