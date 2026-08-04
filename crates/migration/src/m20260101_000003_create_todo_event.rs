@@ -39,10 +39,7 @@ impl MigrationTrait for Migration {
                             .string_len(16)
                             .not_null()
                             .default("user")
-                            .check(
-                                Expr::col(TodoEvent::Actor)
-                                    .is_in(["user", "sync", "system"]),
-                            ),
+                            .check(Expr::col(TodoEvent::Actor).is_in(["user", "sync", "system"])),
                     )
                     .col(
                         ColumnDef::new(TodoEvent::OccurredAt)

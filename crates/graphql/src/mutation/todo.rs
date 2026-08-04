@@ -2,6 +2,7 @@
 
 use async_graphql;
 use entity::sea_orm_active_enums::TodoStatus;
+use std::sync::Arc;
 
 pub struct TodoMutations;
 
@@ -13,9 +14,11 @@ impl TodoMutations {
         title: String,
         description: Option<String>,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::TodoService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::TodoService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .create(title, description)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -28,9 +31,11 @@ impl TodoMutations {
         title: Option<String>,
         description: Option<String>,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::TodoService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::TodoService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .update(id, title, description)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -43,9 +48,11 @@ impl TodoMutations {
         status: TodoStatus,
         blockedReason: Option<String>,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::TodoService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::TodoService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .set_status(id, status, blockedReason)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;

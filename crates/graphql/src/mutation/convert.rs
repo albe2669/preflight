@@ -2,6 +2,7 @@
 
 use async_graphql;
 use entity::sea_orm_active_enums::LinkRelation;
+use std::sync::Arc;
 
 pub struct ConvertMutations;
 
@@ -13,9 +14,11 @@ impl ConvertMutations {
         pullRequestId: i64,
         planToday: bool,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::LinkService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::LinkService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .todo_from_pr(pullRequestId, planToday)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -28,9 +31,11 @@ impl ConvertMutations {
         pullRequestId: i64,
         relation: LinkRelation,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::LinkService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::LinkService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .link_pr(todoId, pullRequestId, relation)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -41,9 +46,11 @@ impl ConvertMutations {
         ctx: &async_graphql::Context<'_>,
         id: i64,
     ) -> async_graphql::Result<entity::pull_request::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let pr = preflight_core::LinkService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::LinkService>>()
+            .unwrap()
+            .clone();
+        let pr = svc
             .dismiss_pr(id)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -55,9 +62,11 @@ impl ConvertMutations {
         linearIssueId: i64,
         planToday: bool,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::LinkService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::LinkService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .todo_from_linear(linearIssueId, planToday)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -69,9 +78,11 @@ impl ConvertMutations {
         todoId: i64,
         linearIssueId: i64,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::LinkService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::LinkService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .link_linear(todoId, linearIssueId)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;

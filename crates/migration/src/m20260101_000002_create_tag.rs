@@ -59,11 +59,7 @@ impl MigrationTrait for Migration {
                             .timestamp_with_time_zone()
                             .not_null(),
                     )
-                    .primary_key(
-                        Index::create()
-                            .col(TodoTag::TodoId)
-                            .col(TodoTag::TagId),
-                    )
+                    .primary_key(Index::create().col(TodoTag::TodoId).col(TodoTag::TagId))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_todo_tag_todo")

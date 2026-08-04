@@ -21,7 +21,11 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     // The API UUID is the sync key...
-                    .col(ColumnDef::new(LinearIssue::LinearId).string_len(64).not_null())
+                    .col(
+                        ColumnDef::new(LinearIssue::LinearId)
+                            .string_len(64)
+                            .not_null(),
+                    )
                     // ...and "ENG-123" is the human key.
                     .col(
                         ColumnDef::new(LinearIssue::Identifier)
@@ -147,10 +151,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_todo_linear_issue_issue")
-                            .from(
-                                TodoLinearIssue::Table,
-                                TodoLinearIssue::LinearIssueId,
-                            )
+                            .from(TodoLinearIssue::Table, TodoLinearIssue::LinearIssueId)
                             .to(LinearIssue::Table, LinearIssue::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )

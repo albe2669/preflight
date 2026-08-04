@@ -4,10 +4,11 @@
 //! (e.g. "github", "linear").  `get` returns the saved cursor string;
 //! `put` writes the current cursor, status, and optional error.
 
+use chrono::Utc;
 use entity::sync_state;
-use preflight_core::Result;
-use preflight_core::clock::now_tz;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+
+use crate::error::Result;
 
 /// Read the cursor for a source, if any.
 pub async fn get(db: &DatabaseConnection, source: &str) -> Result<Option<String>> {
@@ -29,7 +30,7 @@ pub async fn put(
     let am = sync_state::ActiveModel {
         source: Set(source.to_string()),
         cursor: Set(cursor),
-        last_synced_at: Set(Some(now_tz())),
+        last_synced_at: Set(Some(Utc::now().into())),
         last_status: Set(status.to_string()),
         last_error: Set(error),
     };

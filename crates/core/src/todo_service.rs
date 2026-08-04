@@ -5,7 +5,6 @@
 //! `started_at`/`closed_at` are denormalized conveniences kept in sync here so
 //! sorting is cheap; they are always derivable from the event log.
 
-use crate::clock::now_tz;
 use entity::sea_orm_active_enums::{EventActor, EventKind, TodoStatus};
 use entity::todo::{ActiveModel, Entity, Model};
 use sea_orm::{
@@ -13,28 +12,58 @@ use sea_orm::{
     QueryOrder, TransactionTrait,
 };
 
-use crate::clock::Clock;
+use crate::clock::{Clock, now_tz};
 use crate::error::{Error, Result};
 use crate::events::EventWriter;
+use async_trait::async_trait;
 
-pub struct TodoService<'a> {
-    db: &'a DatabaseConnection,
-    clock: &'a Clock,
+#[async_trait]
+pub trait TodoService: Send + Sync {
+    async fn get(&self, id: i64) -> Result<Model>;
+    async fn create(&self, title: String, description: Option<String>) -> Result<Model>;
+    async fn update(
+        &self,
+        id: i64,
+        title: Option<String>,
+        description: Option<String>,
+    ) -> Result<Model>;
+    async fn set_status(
+        &self,
+        id: i64,
+        status: TodoStatus,
+        blocked_reason: Option<String>,
+    ) -> Result<Model>;
+    async fn all(&self) -> Result<Vec<Model>>;
+    async fn find_by_title(&self, title: &str) -> Result<Option<Model>>;
 }
 
-impl<'a> TodoService<'a> {
-    pub fn new(db: &'a DatabaseConnection, clock: &'a Clock) -> Self {
+/// Concrete implementation. Private; only the constructor is pub.
+pub(crate) struct TodoServiceImpl {
+    db: DatabaseConnection,
+    clock: Clock,
+}
+
+impl TodoServiceImpl {
+    pub(crate) fn new(db: DatabaseConnection, clock: Clock) -> Self {
         Self { db, clock }
     }
+}
 
-    pub async fn get(&self, id: i64) -> Result<Model> {
+/// Construct a todo service. Called from server/main only.
+pub fn new(db: DatabaseConnection, clock: Clock) -> impl TodoService {
+    TodoServiceImpl::new(db, clock)
+}
+
+#[async_trait]
+impl TodoService for TodoServiceImpl {
+    async fn get(&self, id: i64) -> Result<Model> {
         Entity::find_by_id(id)
-            .one(self.db)
+            .one(&self.db)
             .await?
             .ok_or_else(|| Error::NotFound(format!("todo {id}")))
     }
 
-    pub async fn create(&self, title: String, description: Option<String>) -> Result<Model> {
+    async fn create(&self, title: String, description: Option<String>) -> Result<Model> {
         let now = now_tz();
         let clock = self.clock.clone();
         let title_for_event = title.clone();
@@ -76,7 +105,7 @@ impl<'a> TodoService<'a> {
     }
 
     /// Update title and/or description. Emits one event per changed field.
-    pub async fn update(
+    async fn update(
         &self,
         id: i64,
         title: Option<String>,
@@ -143,7 +172,7 @@ impl<'a> TodoService<'a> {
     /// Set status. Emits `StatusChanged` on any transition, plus `Blocked`/
     /// `Unblocked` when entering/leaving `Blocked`. Maintains `started_at`
     /// (on first `Started`) and `closed_at` (terminal states).
-    pub async fn set_status(
+    async fn set_status(
         &self,
         id: i64,
         status: TodoStatus,
@@ -232,18 +261,18 @@ impl<'a> TodoService<'a> {
 
     /// All todos, newest first. Convenience for internal callers; GraphQL
     /// reads come through the generated Seaography query root.
-    pub async fn all(&self) -> Result<Vec<Model>> {
+    async fn all(&self) -> Result<Vec<Model>> {
         Ok(Entity::find()
             .order_by_desc(entity::todo::Column::CreatedAt)
-            .all(self.db)
+            .all(&self.db)
             .await?)
     }
 
     /// Find a todo by exact title match.
-    pub async fn find_by_title(&self, title: &str) -> Result<Option<Model>> {
+    async fn find_by_title(&self, title: &str) -> Result<Option<Model>> {
         Ok(Entity::find()
             .filter(entity::todo::Column::Title.eq(title))
-            .one(self.db)
+            .one(&self.db)
             .await?)
     }
 }

@@ -5,4 +5,4 @@ pub mod query;
 pub mod query_root;
 pub mod types;
 
-pub use query_root::{schema, schema_builder};
+pub use query_root::schema_builder;

@@ -6,17 +6,22 @@
 use crate::entities::*;
 use async_graphql::dynamic::*;
 use sea_orm::DatabaseConnection;
-use seaography::{Builder, BuilderContext, async_graphql, lazy_static::lazy_static};
+use seaography::{Builder, BuilderContext, async_graphql};
+use std::sync::{Arc, LazyLock};
 
-lazy_static! {
-    static ref CONTEXT: BuilderContext = BuilderContext::default();
-}
+static CONTEXT: LazyLock<BuilderContext> = LazyLock::new(BuilderContext::default);
 
 /// Build a ready-to-finish `SchemaBuilder` with entities, enums, custom
 /// queries, and custom mutations wired in.
+#[allow(clippy::too_many_arguments)]
 pub fn schema_builder(
     database: DatabaseConnection,
-    clock: preflight_core::Clock,
+    todo: Arc<dyn preflight_core::TodoService>,
+    day_plan: Arc<dyn preflight_core::DayPlanService>,
+    link: Arc<dyn preflight_core::LinkService>,
+    review: Arc<dyn preflight_core::ReviewService>,
+    github: Arc<dyn sync::github::GithubSync>,
+    linear: Arc<dyn sync::linear::LinearSync>,
     depth: Option<usize>,
     complexity: Option<usize>,
 ) -> SchemaBuilder {
@@ -59,10 +64,10 @@ pub fn schema_builder(
         .set_complexity_limit(complexity)
         .schema_builder()
         .data(database)
-        .data(clock)
-}
-
-/// Build a finished `Schema` ready to serve.
-pub fn schema(database: DatabaseConnection, clock: preflight_core::Clock) -> Result<Schema, SchemaError> {
-    schema_builder(database, clock, None, None).finish()
+        .data(todo)
+        .data(day_plan)
+        .data(link)
+        .data(review)
+        .data(github)
+        .data(linear)
 }

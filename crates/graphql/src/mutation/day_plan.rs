@@ -1,6 +1,7 @@
 //! Day plan mutations: plan, unplan, reorder, carry over.
 
 use async_graphql;
+use std::sync::Arc;
 
 pub struct DayPlanMutations;
 
@@ -11,9 +12,11 @@ impl DayPlanMutations {
         ctx: &async_graphql::Context<'_>,
         todoId: i64,
     ) -> async_graphql::Result<entity::todo_day_plan::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let plan = preflight_core::DayPlanService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .unwrap()
+            .clone();
+        let plan = svc
             .plan_today(todoId)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -24,10 +27,11 @@ impl DayPlanMutations {
         ctx: &async_graphql::Context<'_>,
         todoId: i64,
     ) -> async_graphql::Result<bool> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        preflight_core::DayPlanService::new(&db, &clock)
-            .unplan_today(todoId)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .unwrap()
+            .clone();
+        svc.unplan_today(todoId)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         // core returns Ok(()) whether or not a row existed; return true on success.
@@ -39,9 +43,11 @@ impl DayPlanMutations {
         date: chrono::NaiveDate,
         todoIds: Vec<i64>,
     ) -> async_graphql::Result<Vec<entity::todo_day_plan::Model>> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let plans = preflight_core::DayPlanService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .unwrap()
+            .clone();
+        let plans = svc
             .reorder(date, &todoIds)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -53,9 +59,11 @@ impl DayPlanMutations {
         from: chrono::NaiveDate,
         to: chrono::NaiveDate,
     ) -> async_graphql::Result<Vec<entity::todo_day_plan::Model>> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let plans = preflight_core::DayPlanService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .unwrap()
+            .clone();
+        let plans = svc
             .carry_over(from, to)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;

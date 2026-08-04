@@ -5,7 +5,6 @@
 //! cron job. `removed_at` is a soft unplan so "what did I *intend* to do
 //! yesterday" stays honest even if an item was pulled off the list at 10am.
 
-use crate::clock::now_tz;
 use chrono::NaiveDate;
 use entity::sea_orm_active_enums::{EventActor, EventKind, TodoStatus};
 use entity::todo;
@@ -15,24 +14,60 @@ use sea_orm::{
     Order, QueryFilter, QueryOrder, TransactionTrait,
 };
 
-use crate::clock::Clock;
+use crate::clock::{Clock, now_tz};
 use crate::error::{Error, Result};
 use crate::events::EventWriter;
+use async_trait::async_trait;
 
-pub struct DayPlanService<'a> {
-    db: &'a DatabaseConnection,
-    clock: &'a Clock,
+#[async_trait]
+pub trait DayPlanService: Send + Sync {
+    async fn plan(&self, todo_id: i64, date: NaiveDate) -> Result<Model>;
+    async fn plan_today(&self, todo_id: i64) -> Result<Model>;
+    async fn unplan_today(&self, todo_id: i64) -> Result<()>;
+    async fn reorder(&self, date: NaiveDate, todo_ids: &[i64]) -> Result<Vec<Model>>;
+    async fn carry_over(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Model>>;
+    async fn list_for_date(&self, date: NaiveDate) -> Result<Vec<Model>>;
 }
 
-impl<'a> DayPlanService<'a> {
-    pub fn new(db: &'a DatabaseConnection, clock: &'a Clock) -> Self {
+/// Concrete implementation. Private; only the constructor is pub.
+pub(crate) struct DayPlanServiceImpl {
+    db: DatabaseConnection,
+    clock: Clock,
+}
+
+impl DayPlanServiceImpl {
+    pub(crate) fn new(db: DatabaseConnection, clock: Clock) -> Self {
         Self { db, clock }
     }
 
+    /// The next position at the tail of a date's plan (max+1, or 0 if empty).
+    async fn tail_position<C: ConnectionTrait + Sync>(txn: &C, date: NaiveDate) -> Result<i64> {
+        let max = Entity::find()
+            .filter(Column::PlanDate.eq(date))
+            .order_by_desc(Column::Position)
+            .one(txn)
+            .await?
+            .map(|m| m.position);
+        Ok(max.map(|p| p + 1).unwrap_or(0))
+    }
+
+    #[allow(dead_code)]
+    fn _ensure_order_used(&self) {
+        let _ = (Order::Asc, Order::Desc);
+    }
+}
+
+/// Construct a day plan service. Called from server/main only.
+pub fn new(db: DatabaseConnection, clock: Clock) -> impl DayPlanService {
+    DayPlanServiceImpl::new(db, clock)
+}
+
+#[async_trait]
+impl DayPlanService for DayPlanServiceImpl {
     /// Plan a todo for a date. Idempotent on `(plan_date, todo_id)`: if a row
     /// exists (even soft-removed), it is reused — `removed_at` is cleared and
     /// `position` set to the tail. Emits a `Planned` event.
-    pub async fn plan(&self, todo_id: i64, date: NaiveDate) -> Result<Model> {
+    async fn plan(&self, todo_id: i64, date: NaiveDate) -> Result<Model> {
         let clock = self.clock.clone();
         self.db
             .transaction(|txn| {
@@ -88,13 +123,13 @@ impl<'a> DayPlanService<'a> {
             .map_err(Into::into)
     }
 
-    pub async fn plan_today(&self, todo_id: i64) -> Result<Model> {
+    async fn plan_today(&self, todo_id: i64) -> Result<Model> {
         self.plan(todo_id, self.clock.now_logical()).await
     }
 
     /// Soft-unplan a todo for today: set `removed_at`. Returns `Ok(())` whether
     /// or not a row existed. Emits an `Unplanned` event if a live row was found.
-    pub async fn unplan_today(&self, todo_id: i64) -> Result<()> {
+    async fn unplan_today(&self, todo_id: i64) -> Result<()> {
         let clock = self.clock.clone();
         let today = self.clock.now_logical();
         self.db
@@ -132,7 +167,7 @@ impl<'a> DayPlanService<'a> {
 
     /// Rewrite `position` 0..N for the given todo ids on that date, in order.
     /// Ids not currently planned for that date are skipped.
-    pub async fn reorder(&self, date: NaiveDate, todo_ids: &[i64]) -> Result<Vec<Model>> {
+    async fn reorder(&self, date: NaiveDate, todo_ids: &[i64]) -> Result<Vec<Model>> {
         let todo_ids: Vec<i64> = todo_ids.to_vec();
         self.db
             .transaction(|txn| {
@@ -162,7 +197,7 @@ impl<'a> DayPlanService<'a> {
     /// Carry unfinished (not done/cancelled) planned todos from one date to
     /// another, marking `carried_over = true`. Idempotent on `(to, todo_id)`.
     /// Emits a `CarriedOver` event per copied todo.
-    pub async fn carry_over(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Model>> {
+    async fn carry_over(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Model>> {
         let clock = self.clock.clone();
         self.db
             .transaction(|txn| {
@@ -237,28 +272,12 @@ impl<'a> DayPlanService<'a> {
     }
 
     /// Today's live plan, in order (removed_at IS NULL, ORDER BY position).
-    pub async fn list_for_date(&self, date: NaiveDate) -> Result<Vec<Model>> {
+    async fn list_for_date(&self, date: NaiveDate) -> Result<Vec<Model>> {
         Ok(Entity::find()
             .filter(Column::PlanDate.eq(date))
             .filter(Column::RemovedAt.is_null())
             .order_by_asc(Column::Position)
-            .all(self.db)
+            .all(&self.db)
             .await?)
-    }
-
-    /// The next position at the tail of a date's plan (max+1, or 0 if empty).
-    async fn tail_position<C: ConnectionTrait + Sync>(txn: &C, date: NaiveDate) -> Result<i64> {
-        let max = Entity::find()
-            .filter(Column::PlanDate.eq(date))
-            .order_by_desc(Column::Position)
-            .one(txn)
-            .await?
-            .map(|m| m.position);
-        Ok(max.map(|p| p + 1).unwrap_or(0))
-    }
-
-    #[allow(dead_code)]
-    fn _ensure_order_used(&self) {
-        let _ = (Order::Asc, Order::Desc);
     }
 }

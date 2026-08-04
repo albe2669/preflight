@@ -154,7 +154,9 @@ pub enum LinkRelation {
 // ---------- TodoStatus ----------
 
 impl seaography::CustomInputType for TodoStatus {
-    fn gql_input_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_input_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("TodoStatusEnum")
     }
     fn parse_value(
@@ -162,7 +164,9 @@ impl seaography::CustomInputType for TodoStatus {
         value: Option<async_graphql::dynamic::ValueAccessor<'_>>,
     ) -> seaography::SeaResult<Self> {
         match value {
-            None => Err(seaography::SeaographyError::AsyncGraphQLError("Value expected".into())),
+            None => Err(seaography::SeaographyError::AsyncGraphQLError(
+                "Value expected".into(),
+            )),
             Some(v) => {
                 let s = v.enum_name()?.to_string();
                 <Self as sea_orm::ActiveEnum>::try_from_value(&s)
@@ -173,7 +177,9 @@ impl seaography::CustomInputType for TodoStatus {
 }
 
 impl seaography::CustomOutputType for TodoStatus {
-    fn gql_output_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_output_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("TodoStatusEnum")
     }
     fn gql_field_value(
@@ -181,16 +187,18 @@ impl seaography::CustomOutputType for TodoStatus {
         _ctx: &'static seaography::BuilderContext,
     ) -> Option<async_graphql::dynamic::FieldValue<'static>> {
         let s = self.to_value();
-        Some(async_graphql::dynamic::FieldValue::value(async_graphql::Value::Enum(
-            async_graphql::Name::new(s),
-        )))
+        Some(async_graphql::dynamic::FieldValue::value(
+            async_graphql::Value::Enum(async_graphql::Name::new(s)),
+        ))
     }
 }
 
 // ---------- EventKind ----------
 
 impl seaography::CustomInputType for EventKind {
-    fn gql_input_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_input_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("EventKindEnum")
     }
     fn parse_value(
@@ -198,7 +206,9 @@ impl seaography::CustomInputType for EventKind {
         value: Option<async_graphql::dynamic::ValueAccessor<'_>>,
     ) -> seaography::SeaResult<Self> {
         match value {
-            None => Err(seaography::SeaographyError::AsyncGraphQLError("Value expected".into())),
+            None => Err(seaography::SeaographyError::AsyncGraphQLError(
+                "Value expected".into(),
+            )),
             Some(v) => {
                 let s = v.enum_name()?.to_string();
                 <Self as sea_orm::ActiveEnum>::try_from_value(&s)
@@ -209,7 +219,9 @@ impl seaography::CustomInputType for EventKind {
 }
 
 impl seaography::CustomOutputType for EventKind {
-    fn gql_output_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_output_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("EventKindEnum")
     }
     fn gql_field_value(
@@ -217,16 +229,18 @@ impl seaography::CustomOutputType for EventKind {
         _ctx: &'static seaography::BuilderContext,
     ) -> Option<async_graphql::dynamic::FieldValue<'static>> {
         let s = self.to_value();
-        Some(async_graphql::dynamic::FieldValue::value(async_graphql::Value::Enum(
-            async_graphql::Name::new(s),
-        )))
+        Some(async_graphql::dynamic::FieldValue::value(
+            async_graphql::Value::Enum(async_graphql::Name::new(s)),
+        ))
     }
 }
 
 // ---------- EventActor ----------
 
 impl seaography::CustomInputType for EventActor {
-    fn gql_input_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_input_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("EventActorEnum")
     }
     fn parse_value(
@@ -234,7 +248,9 @@ impl seaography::CustomInputType for EventActor {
         value: Option<async_graphql::dynamic::ValueAccessor<'_>>,
     ) -> seaography::SeaResult<Self> {
         match value {
-            None => Err(seaography::SeaographyError::AsyncGraphQLError("Value expected".into())),
+            None => Err(seaography::SeaographyError::AsyncGraphQLError(
+                "Value expected".into(),
+            )),
             Some(v) => {
                 let s = v.enum_name()?.to_string();
                 <Self as sea_orm::ActiveEnum>::try_from_value(&s)
@@ -245,7 +261,9 @@ impl seaography::CustomInputType for EventActor {
 }
 
 impl seaography::CustomOutputType for EventActor {
-    fn gql_output_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_output_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("EventActorEnum")
     }
     fn gql_field_value(
@@ -253,16 +271,18 @@ impl seaography::CustomOutputType for EventActor {
         _ctx: &'static seaography::BuilderContext,
     ) -> Option<async_graphql::dynamic::FieldValue<'static>> {
         let s = self.to_value();
-        Some(async_graphql::dynamic::FieldValue::value(async_graphql::Value::Enum(
-            async_graphql::Name::new(s),
-        )))
+        Some(async_graphql::dynamic::FieldValue::value(
+            async_graphql::Value::Enum(async_graphql::Name::new(s)),
+        ))
     }
 }
 
 // ---------- PullRequestState ----------
 
 impl seaography::CustomInputType for PullRequestState {
-    fn gql_input_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_input_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("PullRequestStateEnum")
     }
     fn parse_value(
@@ -270,7 +290,9 @@ impl seaography::CustomInputType for PullRequestState {
         value: Option<async_graphql::dynamic::ValueAccessor<'_>>,
     ) -> seaography::SeaResult<Self> {
         match value {
-            None => Err(seaography::SeaographyError::AsyncGraphQLError("Value expected".into())),
+            None => Err(seaography::SeaographyError::AsyncGraphQLError(
+                "Value expected".into(),
+            )),
             Some(v) => {
                 let s = v.enum_name()?.to_string();
                 <Self as sea_orm::ActiveEnum>::try_from_value(&s)
@@ -281,7 +303,9 @@ impl seaography::CustomInputType for PullRequestState {
 }
 
 impl seaography::CustomOutputType for PullRequestState {
-    fn gql_output_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_output_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("PullRequestStateEnum")
     }
     fn gql_field_value(
@@ -289,16 +313,18 @@ impl seaography::CustomOutputType for PullRequestState {
         _ctx: &'static seaography::BuilderContext,
     ) -> Option<async_graphql::dynamic::FieldValue<'static>> {
         let s = self.to_value();
-        Some(async_graphql::dynamic::FieldValue::value(async_graphql::Value::Enum(
-            async_graphql::Name::new(s),
-        )))
+        Some(async_graphql::dynamic::FieldValue::value(
+            async_graphql::Value::Enum(async_graphql::Name::new(s)),
+        ))
     }
 }
 
 // ---------- LinkRelation ----------
 
 impl seaography::CustomInputType for LinkRelation {
-    fn gql_input_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_input_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("LinkRelationEnum")
     }
     fn parse_value(
@@ -306,7 +332,9 @@ impl seaography::CustomInputType for LinkRelation {
         value: Option<async_graphql::dynamic::ValueAccessor<'_>>,
     ) -> seaography::SeaResult<Self> {
         match value {
-            None => Err(seaography::SeaographyError::AsyncGraphQLError("Value expected".into())),
+            None => Err(seaography::SeaographyError::AsyncGraphQLError(
+                "Value expected".into(),
+            )),
             Some(v) => {
                 let s = v.enum_name()?.to_string();
                 <Self as sea_orm::ActiveEnum>::try_from_value(&s)
@@ -317,7 +345,9 @@ impl seaography::CustomInputType for LinkRelation {
 }
 
 impl seaography::CustomOutputType for LinkRelation {
-    fn gql_output_type_ref(_ctx: &'static seaography::BuilderContext) -> async_graphql::dynamic::TypeRef {
+    fn gql_output_type_ref(
+        _ctx: &'static seaography::BuilderContext,
+    ) -> async_graphql::dynamic::TypeRef {
         async_graphql::dynamic::TypeRef::named_nn("LinkRelationEnum")
     }
     fn gql_field_value(
@@ -325,8 +355,8 @@ impl seaography::CustomOutputType for LinkRelation {
         _ctx: &'static seaography::BuilderContext,
     ) -> Option<async_graphql::dynamic::FieldValue<'static>> {
         let s = self.to_value();
-        Some(async_graphql::dynamic::FieldValue::value(async_graphql::Value::Enum(
-            async_graphql::Name::new(s),
-        )))
+        Some(async_graphql::dynamic::FieldValue::value(
+            async_graphql::Value::Enum(async_graphql::Name::new(s)),
+        ))
     }
 }

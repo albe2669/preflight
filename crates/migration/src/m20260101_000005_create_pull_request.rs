@@ -26,7 +26,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("github"),
                     )
-                    .col(ColumnDef::new(PullRequest::Owner).string_len(128).not_null())
+                    .col(
+                        ColumnDef::new(PullRequest::Owner)
+                            .string_len(128)
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(PullRequest::Repo).string_len(128).not_null())
                     .col(ColumnDef::new(PullRequest::Number).integer().not_null())
                     .col(ColumnDef::new(PullRequest::Title).text().not_null())
@@ -145,10 +149,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_todo_pull_request_pr")
-                            .from(
-                                TodoPullRequest::Table,
-                                TodoPullRequest::PullRequestId,
-                            )
+                            .from(TodoPullRequest::Table, TodoPullRequest::PullRequestId)
                             .to(PullRequest::Table, PullRequest::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )

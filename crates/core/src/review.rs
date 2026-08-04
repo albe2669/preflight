@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::clock::Clock;
 use crate::error::Result;
+use async_trait::async_trait;
 
 /// A day's review: planned, touched, completed, and carried-over todos.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,24 +29,53 @@ pub struct DailyReview {
     pub carried_over: Vec<Todo>,
 }
 
-pub struct ReviewService<'a> {
-    db: &'a DatabaseConnection,
-    #[allow(dead_code)]
-    clock: &'a Clock,
+#[async_trait]
+pub trait ReviewService: Send + Sync {
+    async fn daily(&self, date: NaiveDate) -> Result<DailyReview>;
 }
 
-impl<'a> ReviewService<'a> {
-    pub fn new(db: &'a DatabaseConnection, clock: &'a Clock) -> Self {
+/// Concrete implementation. Private; only the constructor is pub.
+pub(crate) struct ReviewServiceImpl {
+    db: DatabaseConnection,
+    clock: Clock,
+}
+
+impl ReviewServiceImpl {
+    pub(crate) fn new(db: DatabaseConnection, clock: Clock) -> Self {
         Self { db, clock }
     }
 
-    pub async fn daily(&self, date: NaiveDate) -> Result<DailyReview> {
+    /// Fetch todos by id, preserving the input order.
+    async fn todos_by_ids(&self, ids: &[i64]) -> Result<Vec<Todo>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = TodoEntity::find()
+            .filter(entity::todo::Column::Id.is_in(ids.to_vec()))
+            .all(&self.db)
+            .await?;
+        // Reorder to match `ids`.
+        let by_id: std::collections::HashMap<i64, Todo> =
+            rows.into_iter().map(|t| (t.id, t)).collect();
+        let ordered = ids.iter().filter_map(|id| by_id.get(id).cloned()).collect();
+        Ok(ordered)
+    }
+}
+
+/// Construct a review service. Called from server/main only.
+pub fn new(db: DatabaseConnection, clock: Clock) -> impl ReviewService {
+    ReviewServiceImpl::new(db, clock)
+}
+
+#[async_trait]
+impl ReviewService for ReviewServiceImpl {
+    async fn daily(&self, date: NaiveDate) -> Result<DailyReview> {
         // Planned that day (live rows only), by position.
         let planned_rows = DayPlanEntity::find()
             .filter(DayPlanColumn::PlanDate.eq(date))
             .filter(DayPlanColumn::RemovedAt.is_null())
             .order_by_asc(DayPlanColumn::Position)
-            .all(self.db)
+            .all(&self.db)
             .await?;
         let planned_ids: Vec<i64> = planned_rows.iter().map(|p| p.todo_id).collect();
         let carried_ids: Vec<i64> = planned_rows
@@ -64,18 +94,19 @@ impl<'a> ReviewService<'a> {
             .column(EventColumn::TodoId)
             .distinct()
             .into_tuple()
-            .all(self.db)
+            .all(&self.db)
             .await?;
         let touched = self.todos_by_ids(&event_todo_ids).await?;
 
         // Completed: touched todos whose closed_at logical date == this date.
         // Using `clock` would recompute, but closed_at is a timestamp and the
         // set is already small (subset of touched), so filter in Rust.
+        let clock = self.clock.clone();
         let completed: Vec<Todo> = touched
             .iter()
             .filter(|t| {
                 t.closed_at
-                    .map(|c| self.clock.logical_date(c.with_timezone(&chrono::Utc)) == date)
+                    .map(|c| clock.logical_date(c.with_timezone(&chrono::Utc)) == date)
                     .unwrap_or(false)
             })
             .cloned()
@@ -88,21 +119,5 @@ impl<'a> ReviewService<'a> {
             completed,
             carried_over,
         })
-    }
-
-    /// Fetch todos by id, preserving the input order.
-    async fn todos_by_ids(&self, ids: &[i64]) -> Result<Vec<Todo>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let rows = TodoEntity::find()
-            .filter(entity::todo::Column::Id.is_in(ids.to_vec()))
-            .all(self.db)
-            .await?;
-        // Reorder to match `ids`.
-        let by_id: std::collections::HashMap<i64, Todo> =
-            rows.into_iter().map(|t| (t.id, t)).collect();
-        let ordered = ids.iter().filter_map(|id| by_id.get(id).cloned()).collect();
-        Ok(ordered)
     }
 }

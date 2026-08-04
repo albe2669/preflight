@@ -15,7 +15,7 @@ use serde_json::Value;
 use crate::clock::Clock;
 use crate::error::Result;
 
-pub struct EventWriter;
+pub(crate) struct EventWriter;
 
 impl EventWriter {
     /// Append one event row on the caller's transaction.

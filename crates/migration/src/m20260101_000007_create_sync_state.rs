@@ -36,8 +36,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("never")
                             .check(
-                                Expr::col(SyncState::LastStatus)
-                                    .is_in(["never", "ok", "error"]),
+                                Expr::col(SyncState::LastStatus).is_in(["never", "ok", "error"]),
                             ),
                     )
                     .col(ColumnDef::new(SyncState::LastError).text().null())

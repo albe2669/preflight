@@ -1,6 +1,7 @@
 //! Tag mutations: add and remove tags from todos.
 
 use async_graphql;
+use std::sync::Arc;
 
 pub struct TagMutations;
 
@@ -12,9 +13,11 @@ impl TagMutations {
         todoId: i64,
         slug: String,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::LinkService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::LinkService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .add_tag(todoId, &slug)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -26,9 +29,11 @@ impl TagMutations {
         todoId: i64,
         slug: String,
     ) -> async_graphql::Result<entity::todo::Model> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let todo = preflight_core::LinkService::new(&db, &clock)
+        let svc = ctx
+            .data::<Arc<dyn preflight_core::LinkService>>()
+            .unwrap()
+            .clone();
+        let todo = svc
             .remove_tag(todoId, &slug)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;

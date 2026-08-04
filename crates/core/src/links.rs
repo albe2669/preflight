@@ -6,7 +6,6 @@
 //! `Review {repo}#{number}`, applies the `review` tag, links the PR with
 //! relation `Reviews`, and optionally drops it on today's plan — one call.
 
-use crate::clock::now_tz;
 use entity::pull_request::{self, Entity as PullRequestEntity, Model as PullRequest};
 use entity::sea_orm_active_enums::{EventActor, EventKind, LinkRelation, TodoStatus};
 use entity::tag::{ActiveModel as TagActiveModel, Entity as TagEntity};
@@ -19,26 +18,74 @@ use sea_orm::{
     QueryFilter, Set, TransactionTrait,
 };
 
-use crate::clock::Clock;
+use crate::clock::{Clock, now_tz};
 use crate::day_plan::DayPlanService;
 use crate::error::{Error, Result};
 use crate::events::EventWriter;
 
+use async_trait::async_trait;
 const REVIEW_SLUG: &str = "review";
 
-pub struct LinkService<'a> {
-    db: &'a DatabaseConnection,
-    clock: &'a Clock,
+#[async_trait]
+pub trait LinkService: Send + Sync {
+    async fn todo_from_pr(&self, pr_id: i64, plan_today: bool) -> Result<Todo>;
+    async fn link_pr(&self, todo_id: i64, pr_id: i64, relation: LinkRelation) -> Result<Todo>;
+    async fn dismiss_pr(&self, pr_id: i64) -> Result<PullRequest>;
+    async fn todo_from_linear(&self, linear_issue_id: i64, plan_today: bool) -> Result<Todo>;
+    async fn link_linear(&self, todo_id: i64, linear_issue_id: i64) -> Result<Todo>;
+    async fn add_tag(&self, todo_id: i64, slug: &str) -> Result<Todo>;
+    async fn remove_tag(&self, todo_id: i64, slug: &str) -> Result<Todo>;
 }
 
-impl<'a> LinkService<'a> {
-    pub fn new(db: &'a DatabaseConnection, clock: &'a Clock) -> Self {
+/// Concrete implementation. Private; only the constructor is pub.
+pub(crate) struct LinkServiceImpl {
+    db: DatabaseConnection,
+    clock: Clock,
+}
+
+impl LinkServiceImpl {
+    pub(crate) fn new(db: DatabaseConnection, clock: Clock) -> Self {
         Self { db, clock }
     }
 
+    async fn ensure_review_tag<C: ConnectionTrait + Sync>(txn: &C) -> Result<i64> {
+        let tag = Self::find_or_create_tag(txn, REVIEW_SLUG, Some("Review")).await?;
+        Ok(tag.id)
+    }
+
+    async fn find_or_create_tag<C: ConnectionTrait + Sync>(
+        txn: &C,
+        slug: &str,
+        name: Option<&str>,
+    ) -> Result<entity::tag::Model> {
+        if let Some(t) = TagEntity::find()
+            .filter(entity::tag::Column::Slug.eq(slug))
+            .one(txn)
+            .await?
+        {
+            return Ok(t);
+        }
+        let a = TagActiveModel {
+            slug: ActiveValue::set(slug.to_string()),
+            name: ActiveValue::set(name.unwrap_or(slug).to_string()),
+            color: ActiveValue::set(None),
+            created_at: ActiveValue::set(now_tz()),
+            ..Default::default()
+        };
+        Ok(a.insert(txn).await?)
+    }
+}
+
+/// Construct a link service. Called from server/main only.
+pub fn new(db: DatabaseConnection, clock: Clock) -> impl LinkService {
+    LinkServiceImpl::new(db, clock)
+}
+
+#[async_trait]
+impl LinkService for LinkServiceImpl {
     /// Convert a PR into a review todo. Title = `Review {repo}#{number}`,
     /// applies the `review` tag, links with `Reviews`, optionally plans today.
-    pub async fn todo_from_pr(&self, pr_id: i64, plan_today: bool) -> Result<Todo> {
+    async fn todo_from_pr(&self, pr_id: i64, plan_today: bool) -> Result<Todo> {
         let clock = self.clock.clone();
         let todo = self
             .db
@@ -129,7 +176,7 @@ impl<'a> LinkService<'a> {
 
         // Plan for today outside the create transaction.
         if plan_today {
-            DayPlanService::new(self.db, self.clock)
+            crate::day_plan::new(self.db.clone(), self.clock.clone())
                 .plan_today(todo.id)
                 .await?;
         }
@@ -138,7 +185,7 @@ impl<'a> LinkService<'a> {
 
     /// Link an existing todo to a PR with a relation. Idempotent: if the link
     /// exists it is updated to the new relation.
-    pub async fn link_pr(&self, todo_id: i64, pr_id: i64, relation: LinkRelation) -> Result<Todo> {
+    async fn link_pr(&self, todo_id: i64, pr_id: i64, relation: LinkRelation) -> Result<Todo> {
         let clock = self.clock.clone();
         self.db
             .transaction(|txn| {
@@ -191,19 +238,19 @@ impl<'a> LinkService<'a> {
     }
 
     /// Dismiss a PR from the inbox without creating a todo.
-    pub async fn dismiss_pr(&self, pr_id: i64) -> Result<PullRequest> {
+    async fn dismiss_pr(&self, pr_id: i64) -> Result<PullRequest> {
         let pr: PullRequest = PullRequestEntity::find_by_id(pr_id)
-            .one(self.db)
+            .one(&self.db)
             .await?
             .ok_or_else(|| Error::NotFound(format!("pull_request {pr_id}")))?;
         let mut a: pull_request::ActiveModel = pr.into();
         a.dismissed_at = Set(Some(now_tz()));
-        Ok(a.update(self.db).await?)
+        Ok(a.update(&self.db).await?)
     }
 
     /// Convert a Linear issue into a todo. Title = the issue's title. Does NOT
     /// plan by default (issues are implementation work, not review work).
-    pub async fn todo_from_linear(&self, linear_issue_id: i64, plan_today: bool) -> Result<Todo> {
+    async fn todo_from_linear(&self, linear_issue_id: i64, plan_today: bool) -> Result<Todo> {
         let clock = self.clock.clone();
         let todo = self
             .db
@@ -272,7 +319,7 @@ impl<'a> LinkService<'a> {
             .await?;
 
         if plan_today {
-            DayPlanService::new(self.db, self.clock)
+            crate::day_plan::new(self.db.clone(), self.clock.clone())
                 .plan_today(todo.id)
                 .await?;
         }
@@ -281,7 +328,7 @@ impl<'a> LinkService<'a> {
 
     /// Link an existing todo to a Linear issue. Idempotent on the issue (an
     /// issue converts to at most one todo — `ux_todo_linear_issue_issue`).
-    pub async fn link_linear(&self, todo_id: i64, linear_issue_id: i64) -> Result<Todo> {
+    async fn link_linear(&self, todo_id: i64, linear_issue_id: i64) -> Result<Todo> {
         let clock = self.clock.clone();
         self.db
             .transaction(|txn| {
@@ -335,7 +382,7 @@ impl<'a> LinkService<'a> {
     }
 
     /// Add a tag by slug to a todo, creating the tag if it does not exist.
-    pub async fn add_tag(&self, todo_id: i64, slug: &str) -> Result<Todo> {
+    async fn add_tag(&self, todo_id: i64, slug: &str) -> Result<Todo> {
         let clock = self.clock.clone();
         let slug = slug.to_string();
         self.db
@@ -381,7 +428,7 @@ impl<'a> LinkService<'a> {
     }
 
     /// Remove a tag by slug from a todo.
-    pub async fn remove_tag(&self, todo_id: i64, slug: &str) -> Result<Todo> {
+    async fn remove_tag(&self, todo_id: i64, slug: &str) -> Result<Todo> {
         let clock = self.clock.clone();
         let slug = slug.to_string();
         self.db
@@ -424,32 +471,5 @@ impl<'a> LinkService<'a> {
             })
             .await
             .map_err(Into::into)
-    }
-
-    async fn ensure_review_tag<C: ConnectionTrait + Sync>(txn: &C) -> Result<i64> {
-        let tag = Self::find_or_create_tag(txn, REVIEW_SLUG, Some("Review")).await?;
-        Ok(tag.id)
-    }
-
-    async fn find_or_create_tag<C: ConnectionTrait + Sync>(
-        txn: &C,
-        slug: &str,
-        name: Option<&str>,
-    ) -> Result<entity::tag::Model> {
-        if let Some(t) = TagEntity::find()
-            .filter(entity::tag::Column::Slug.eq(slug))
-            .one(txn)
-            .await?
-        {
-            return Ok(t);
-        }
-        let a = TagActiveModel {
-            slug: ActiveValue::set(slug.to_string()),
-            name: ActiveValue::set(name.unwrap_or(slug).to_string()),
-            color: ActiveValue::set(None),
-            created_at: ActiveValue::set(now_tz()),
-            ..Default::default()
-        };
-        Ok(a.insert(txn).await?)
     }
 }

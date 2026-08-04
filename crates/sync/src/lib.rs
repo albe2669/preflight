@@ -5,5 +5,10 @@
 //! without network by taking a no-op path.
 
 pub mod cursor;
+pub mod error;
 pub mod github;
 pub mod linear;
+
+pub use error::{Result, SyncError};
+pub use github::{GithubOptions, GithubSync, PrRecord};
+pub use linear::{IssueRecord, LinearOptions, LinearSync};

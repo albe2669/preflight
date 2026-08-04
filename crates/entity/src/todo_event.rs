@@ -2,15 +2,7 @@ use crate::sea_orm_active_enums::{EventActor, EventKind};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    DeriveEntityModel,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "todo_event")]
 pub struct Model {
     #[sea_orm(primary_key)]

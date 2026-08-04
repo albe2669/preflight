@@ -1,5 +1,7 @@
 //! Custom queries registered with the Seaography builder.
 
+use std::sync::Arc;
+
 pub struct Queries;
 
 #[seaography::CustomFields]
@@ -9,9 +11,11 @@ impl Queries {
         ctx: &async_graphql::Context<'_>,
         date: chrono::NaiveDate,
     ) -> async_graphql::Result<crate::types::DailyReview> {
-        let db = ctx.data::<sea_orm::DatabaseConnection>().unwrap().clone();
-        let clock = ctx.data::<preflight_core::Clock>().unwrap().clone();
-        let review = preflight_core::ReviewService::new(&db, &clock)
+        let review_svc = ctx
+            .data::<Arc<dyn preflight_core::ReviewService>>()
+            .unwrap()
+            .clone();
+        let review = review_svc
             .daily(date)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;

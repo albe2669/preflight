@@ -11,10 +11,10 @@ path = "src/lib.rs"
 
 [dependencies]
 entity.workspace = true
-preflight-core.workspace = true
 sea-orm.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+async-trait.workspace = true

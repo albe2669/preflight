@@ -1,3 +1,5 @@
+#![allow(async_fn_in_trait)]
+
 //! The only crate that writes to the database.
 //!
 //! Every mutation — whether from a GraphQL resolver or a sync puller — goes
@@ -16,7 +18,6 @@ pub mod todo_service;
 pub use clock::Clock;
 pub use day_plan::DayPlanService;
 pub use error::{Error, Result};
-pub use events::EventWriter;
 pub use links::LinkService;
 pub use review::{DailyReview, ReviewService};
 pub use todo_service::TodoService;
