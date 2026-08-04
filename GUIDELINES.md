@@ -48,10 +48,9 @@ This document defines the architecture, coding, and testing conventions for this
 │   ├── server/                # axum server, wiring, lifecycle
 │   │   └── src/
 │   │       ├── main.rs  db.rs  config.rs  routes.rs
-│   ├── linear/                 # Linear sync client, cursor parsing, rate-limit etc.
+│   ├── sync/                  # one-way remote pullers (Linear + GitHub)
 │   │   └── src/
-│   ├── github/                 # Github sync client, cursor parsing, rate-limit etc.
-│   │   └── src/
+│   │       ├── linear.rs  github.rs  cursor.rs  error.rs
 │   └── <domain>/                 # extra domains
 │       └── src/
 ├── config/
@@ -284,7 +283,7 @@ Rules:
 * The `mod.rs` file is generated and includes a `seaography::register_entity_modules!([...])` macro call listing every entity module. Keep this in sync when adding/removing tables.
 * `prelude.rs` re-exports `Entity as <Name>` aliases. Use these (`entity::prelude::Todo`) in query code, not the raw module path.
 * Enums (`sea_orm_active_enums.rs`) are **hand-maintained** on top of the generated output. The generation command preserves manual enum additions; verify after regenerating.
-* The `entity` crate is a shared dependency. It contains only data models — no logic, no traits, no constructors.
+* The `entity` crate is a shared dependency. It contains only data models — no logic, no constructors. The one exception is the `sea_orm_active_enums.rs` module and the `impl_custom_output_type_for_entity!` / `CustomInputType`/`CustomOutputType` bridges, which must live in the defining crate to satisfy the orphan rule and make the models/enums usable as GraphQL types via Seaography. These bridges are generated-coupled glue, not domain logic.
 
 ### The event log
 
