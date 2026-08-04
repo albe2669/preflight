@@ -1,0 +1,32 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+entity.workspace = true
+migration.workspace = true
+preflight-core.workspace = true
+sync.workspace = true
+graphql.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+async-graphql.workspace = true
+async-graphql-axum.workspace = true
+axum.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["sqlite"] }
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+toml.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+anyhow.workspace = true

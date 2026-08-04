@@ -5,7 +5,7 @@
 let
   projectRoot = builtins.toString ./.;
   migrationDir = "crates/migration";
-  serverDir = ./server;
+  serverDir = ./crates/server;
   entityDir = "crates/entity/src";
 in
 {
@@ -40,7 +40,7 @@ in
       cwd = builtins.toString serverDir;
       watch = {
         paths = [
-          ./server
+          ./crates/server
         ];
         ignore = [
           "**/target/**"
@@ -72,21 +72,21 @@ in
   '';
 
   tasks = {
-    "server:migrate" = {
-      exec = "sea-orm-cli migrate -d ${migrationDir}";
+    "db:migrate" = {
+      exec = "cargo run -p migration -- up";
     };
-    "server:generate-entities" = {
-      exec = "sea-orm-cli generate entity -o ${entityDir} --with-serde both --model-extra-derives 'async_graphql::SimpleObject' --seaography";
-      after = [
-        "server:migrate"
-      ];
+    "db:fresh" = {
+      exec = "rm -f db.sqlite db.sqlite-* && cargo run -p migration -- fresh";
     };
-    "server:generate-server" = {
-      exec = ''
-        seaography-cli -o crates/graphql -e ${entityDir} --framework axum graphql
-      '';
-      after = [ "server:generate-entities" ];
-      cwd = builtins.toString serverDir;
+    # Regenerate entities from the live schema. NOTE: this overwrites the
+    # hand-maintained enum typing in crates/entity/src — re-apply the
+    # ActiveEnum column types and the sea_orm_active_enums module afterward.
+    "gen:entities" = {
+      exec = "sea-orm-cli generate entity -o ${entityDir} --with-serde both --seaography";
+      after = [ "db:migrate" ];
+    };
+    "run" = {
+      exec = "cargo run -p server";
     };
   };
 

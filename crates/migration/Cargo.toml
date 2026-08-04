@@ -1,17 +1,18 @@
 [package]
-edition      = "2024"
-name         = "migration"
-publish      = false
-rust-version = "1.85.0"
-version      = "0.1.0"
+name = "migration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [lib]
 name = "migration"
 path = "src/lib.rs"
 
-[dependencies]
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+[[bin]]
+name = "migration"
+path = "src/main.rs"
 
-[dependencies.sea-orm-migration]
-features = ["sqlx-sqlite", "runtime-tokio-native-tls"]
-version = "2.0.0"
+[dependencies]
+sea-orm-migration.workspace = true
+tokio.workspace = true
