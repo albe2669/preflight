@@ -1,0 +1,36 @@
+# Application configuration for the todo planner.
+#
+# The database path, timezone, and day-start hour live here — not in the
+# database — because they are application configuration, not data. The server
+# loads this file (or one named by the CONFIG env var) at startup.
+
+[database]
+# Relative paths resolve against the project root. `mode=rwc` creates the file
+# if missing; the sqlx pool builder sets pragmas (FK on, WAL, busy_timeout).
+path = "db.sqlite"
+
+[clock]
+# IANA timezone. The logical day is computed in this zone.
+timezone = "America/Los_Angeles"
+# A logical day starts at this hour (0-23), local time. 4 means 04:00: a todo
+# you touch at 02:00 counts as *yesterday*, which keeps late-night work off the
+# morning plan. Stored as i64 to match Clock::day_start_hour.
+day_start_hour = 4
+
+[sync]
+# GitHub. `search_query` is a saved-search query (e.g. "review-requested:<user>").
+# Leave the token unset in development; the sync crate treats absence as a no-op.
+github_token = ""
+github_search_query = "review-requested:@me"
+
+# Linear. The token is a personal API key. `team_keys` filters ingest to those
+# teams; an empty list means "all teams I can see".
+linear_token = ""
+linear_team_keys = []
+
+[server]
+host = "127.0.0.1"
+port = 8000
+# Optional GraphQL limits.
+# depth_limit = 12
+# complexity_limit = 1000
