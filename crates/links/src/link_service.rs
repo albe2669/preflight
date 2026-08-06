@@ -365,18 +365,18 @@ impl LinkService for LinkServiceImpl {
                         .one(txn)
                         .await?;
                     if let Some(row) = existing {
-                        let mut a: todo_linear_issue::ActiveModel = row.into();
-                        a.todo_id = ActiveValue::set(todo_id);
-                        a.update(txn).await?;
-                    } else {
-                        let _ = todo_linear_issue::ActiveModel {
-                            todo_id: ActiveValue::set(todo_id),
-                            linear_issue_id: ActiveValue::set(linear_issue_id),
-                            created_at: ActiveValue::set(now_tz()),
-                        }
-                        .insert(txn)
-                        .await?;
+                        // Can't update a composite PK column via ActiveModel::update — delete + insert.
+                        let _ = TliEntity::delete_by_id((row.todo_id, row.linear_issue_id))
+                            .exec(txn)
+                            .await?;
                     }
+                    let _ = todo_linear_issue::ActiveModel {
+                        todo_id: ActiveValue::set(todo_id),
+                        linear_issue_id: ActiveValue::set(linear_issue_id),
+                        created_at: ActiveValue::set(now_tz()),
+                    }
+                    .insert(txn)
+                    .await?;
                     EventWriter::append(
                         txn,
                         &clock,
