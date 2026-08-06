@@ -1,0 +1,724 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+enum LinkRelationEnum {
+  reviews
+  implements
+  references
+}
+
+enum OrderByEnum {
+  ASC
+  DESC
+}
+
+enum TodoStatusEnum {
+  todo
+  started
+  blocked
+  done
+  cancelled
+}
+
+input BooleanFilterInput {
+  eq: Boolean
+  ne: Boolean
+  gt: Boolean
+  gte: Boolean
+  lt: Boolean
+  lte: Boolean
+  is_in: [Boolean!]
+  is_not_in: [Boolean!]
+  is_null: Boolean
+}
+
+input CursorInput {
+  cursor: String
+  limit: Int!
+}
+
+input IntegerFilterInput {
+  eq: Int
+  ne: Int
+  gt: Int
+  gte: Int
+  lt: Int
+  lte: Int
+  is_in: [Int!]
+  is_not_in: [Int!]
+  is_null: Boolean
+  between: [Int!]
+  not_between: [Int!]
+}
+
+input LinearIssueFilterInput {
+  id: IntegerFilterInput
+  linearId: StringFilterInput
+  identifier: StringFilterInput
+  title: StringFilterInput
+  description: StringFilterInput
+  url: StringFilterInput
+  stateName: StringFilterInput
+  stateType: StringFilterInput
+  priority: IntegerFilterInput
+  teamKey: StringFilterInput
+  assigneeName: StringFilterInput
+  assignedToMe: BooleanFilterInput
+  remoteCreatedAt: TextFilterInput
+  remoteUpdatedAt: TextFilterInput
+  syncedAt: TextFilterInput
+  dismissedAt: TextFilterInput
+  and: [LinearIssueFilterInput!]
+  or: [LinearIssueFilterInput!]
+  not: LinearIssueFilterInput
+}
+
+input LinearIssueHavingInput {
+  _: Boolean
+}
+
+input LinearIssueOrderInput {
+  id: OrderByEnum
+  linearId: OrderByEnum
+  identifier: OrderByEnum
+  title: OrderByEnum
+  description: OrderByEnum
+  url: OrderByEnum
+  stateName: OrderByEnum
+  stateType: OrderByEnum
+  priority: OrderByEnum
+  teamKey: OrderByEnum
+  assigneeName: OrderByEnum
+  assignedToMe: OrderByEnum
+  remoteCreatedAt: OrderByEnum
+  remoteUpdatedAt: OrderByEnum
+  syncedAt: OrderByEnum
+  dismissedAt: OrderByEnum
+}
+
+input OffsetInput {
+  limit: Int!
+  offset: Int!
+}
+
+input PageInput {
+  limit: Int!
+  page: Int!
+}
+
+input PaginationInput {
+  cursor: CursorInput
+  page: PageInput
+  offset: OffsetInput
+}
+
+input PullRequestFilterInput {
+  id: IntegerFilterInput
+  provider: StringFilterInput
+  owner: StringFilterInput
+  repo: StringFilterInput
+  number: IntegerFilterInput
+  title: StringFilterInput
+  url: StringFilterInput
+  author: StringFilterInput
+  state: StringFilterInput
+  reviewRequested: BooleanFilterInput
+  authoredByMe: BooleanFilterInput
+  remoteCreatedAt: TextFilterInput
+  remoteUpdatedAt: TextFilterInput
+  syncedAt: TextFilterInput
+  dismissedAt: TextFilterInput
+  and: [PullRequestFilterInput!]
+  or: [PullRequestFilterInput!]
+  not: PullRequestFilterInput
+}
+
+input PullRequestHavingInput {
+  _: Boolean
+}
+
+input PullRequestOrderInput {
+  id: OrderByEnum
+  provider: OrderByEnum
+  owner: OrderByEnum
+  repo: OrderByEnum
+  number: OrderByEnum
+  title: OrderByEnum
+  url: OrderByEnum
+  author: OrderByEnum
+  state: OrderByEnum
+  reviewRequested: OrderByEnum
+  authoredByMe: OrderByEnum
+  remoteCreatedAt: OrderByEnum
+  remoteUpdatedAt: OrderByEnum
+  syncedAt: OrderByEnum
+  dismissedAt: OrderByEnum
+}
+
+input StringFilterInput {
+  eq: String
+  ne: String
+  gt: String
+  gte: String
+  lt: String
+  lte: String
+  ci_eq: String
+  is_in: [String!]
+  is_not_in: [String!]
+  is_null: Boolean
+  contains: String
+  starts_with: String
+  ends_with: String
+  like: String
+  not_like: String
+  between: [String!]
+  not_between: [String!]
+}
+
+input SyncStateFilterInput {
+  source: StringFilterInput
+  cursor: StringFilterInput
+  lastSyncedAt: TextFilterInput
+  lastStatus: StringFilterInput
+  lastError: StringFilterInput
+  and: [SyncStateFilterInput!]
+  or: [SyncStateFilterInput!]
+  not: SyncStateFilterInput
+}
+
+input SyncStateHavingInput {
+  _: Boolean
+}
+
+input SyncStateOrderInput {
+  source: OrderByEnum
+  cursor: OrderByEnum
+  lastSyncedAt: OrderByEnum
+  lastStatus: OrderByEnum
+  lastError: OrderByEnum
+}
+
+input TagFilterInput {
+  id: IntegerFilterInput
+  slug: StringFilterInput
+  name: StringFilterInput
+  color: StringFilterInput
+  createdAt: TextFilterInput
+  and: [TagFilterInput!]
+  or: [TagFilterInput!]
+  not: TagFilterInput
+}
+
+input TagHavingInput {
+  todoTag: TodoTagFilterInput
+  todo: TodoFilterInput
+}
+
+input TagOrderInput {
+  id: OrderByEnum
+  slug: OrderByEnum
+  name: OrderByEnum
+  color: OrderByEnum
+  createdAt: OrderByEnum
+}
+
+input TextFilterInput {
+  eq: String
+  ne: String
+  gt: String
+  gte: String
+  lt: String
+  lte: String
+  is_in: [String!]
+  is_not_in: [String!]
+  is_null: Boolean
+  between: [String!]
+  not_between: [String!]
+}
+
+input TodoDayPlanFilterInput {
+  id: IntegerFilterInput
+  planDate: TextFilterInput
+  todoId: IntegerFilterInput
+  position: IntegerFilterInput
+  carriedOver: BooleanFilterInput
+  addedAt: TextFilterInput
+  removedAt: TextFilterInput
+  and: [TodoDayPlanFilterInput!]
+  or: [TodoDayPlanFilterInput!]
+  not: TodoDayPlanFilterInput
+}
+
+input TodoDayPlanHavingInput {
+  todo: TodoFilterInput
+}
+
+input TodoDayPlanOrderInput {
+  id: OrderByEnum
+  planDate: OrderByEnum
+  todoId: OrderByEnum
+  position: OrderByEnum
+  carriedOver: OrderByEnum
+  addedAt: OrderByEnum
+  removedAt: OrderByEnum
+}
+
+input TodoEventFilterInput {
+  id: IntegerFilterInput
+  todoId: IntegerFilterInput
+  kind: StringFilterInput
+  field: StringFilterInput
+  oldValue: StringFilterInput
+  newValue: StringFilterInput
+  actor: StringFilterInput
+  occurredAt: TextFilterInput
+  logicalDate: TextFilterInput
+  and: [TodoEventFilterInput!]
+  or: [TodoEventFilterInput!]
+  not: TodoEventFilterInput
+}
+
+input TodoEventHavingInput {
+  todo: TodoFilterInput
+}
+
+input TodoEventOrderInput {
+  id: OrderByEnum
+  todoId: OrderByEnum
+  kind: OrderByEnum
+  field: OrderByEnum
+  oldValue: OrderByEnum
+  newValue: OrderByEnum
+  payload: OrderByEnum
+  actor: OrderByEnum
+  occurredAt: OrderByEnum
+  logicalDate: OrderByEnum
+}
+
+input TodoFilterInput {
+  id: IntegerFilterInput
+  title: StringFilterInput
+  description: StringFilterInput
+  status: StringFilterInput
+  blockedReason: StringFilterInput
+  sortKey: IntegerFilterInput
+  createdAt: TextFilterInput
+  updatedAt: TextFilterInput
+  startedAt: TextFilterInput
+  closedAt: TextFilterInput
+  and: [TodoFilterInput!]
+  or: [TodoFilterInput!]
+  not: TodoFilterInput
+}
+
+input TodoHavingInput {
+  todoDayPlan: TodoDayPlanFilterInput
+  todoEvent: TodoEventFilterInput
+  todoTag: TodoTagFilterInput
+  tag: TagFilterInput
+}
+
+input TodoLinearIssueFilterInput {
+  todoId: IntegerFilterInput
+  linearIssueId: IntegerFilterInput
+  createdAt: TextFilterInput
+  and: [TodoLinearIssueFilterInput!]
+  or: [TodoLinearIssueFilterInput!]
+  not: TodoLinearIssueFilterInput
+}
+
+input TodoLinearIssueHavingInput {
+  linearIssue: LinearIssueFilterInput
+  todo: TodoFilterInput
+}
+
+input TodoLinearIssueOrderInput {
+  todoId: OrderByEnum
+  linearIssueId: OrderByEnum
+  createdAt: OrderByEnum
+}
+
+input TodoOrderInput {
+  id: OrderByEnum
+  title: OrderByEnum
+  description: OrderByEnum
+  status: OrderByEnum
+  blockedReason: OrderByEnum
+  sortKey: OrderByEnum
+  createdAt: OrderByEnum
+  updatedAt: OrderByEnum
+  startedAt: OrderByEnum
+  closedAt: OrderByEnum
+}
+
+input TodoPullRequestFilterInput {
+  todoId: IntegerFilterInput
+  pullRequestId: IntegerFilterInput
+  relation: StringFilterInput
+  createdAt: TextFilterInput
+  and: [TodoPullRequestFilterInput!]
+  or: [TodoPullRequestFilterInput!]
+  not: TodoPullRequestFilterInput
+}
+
+input TodoPullRequestHavingInput {
+  pullRequest: PullRequestFilterInput
+  todo: TodoFilterInput
+}
+
+input TodoPullRequestOrderInput {
+  todoId: OrderByEnum
+  pullRequestId: OrderByEnum
+  relation: OrderByEnum
+  createdAt: OrderByEnum
+}
+
+input TodoTagFilterInput {
+  todoId: IntegerFilterInput
+  tagId: IntegerFilterInput
+  createdAt: TextFilterInput
+  and: [TodoTagFilterInput!]
+  or: [TodoTagFilterInput!]
+  not: TodoTagFilterInput
+}
+
+input TodoTagHavingInput {
+  tag: TagFilterInput
+  todo: TodoFilterInput
+}
+
+input TodoTagOrderInput {
+  todoId: OrderByEnum
+  tagId: OrderByEnum
+  createdAt: OrderByEnum
+}
+
+type Array {
+  array: ColumnType!
+}
+
+type Column {
+  name: String!
+  type_: ColumnType!
+  nullable: Boolean!
+  unique: Boolean
+  comment: String
+}
+
+type ColumnType {
+  primitive: String
+  array: Array
+  enumeration: Enumeration
+}
+
+type DailyReview {
+  date: String!
+  planned: [Todo!]!
+  touched: [Todo!]!
+  completed: [Todo!]!
+  carriedOver: [Todo!]!
+}
+
+type Enumeration {
+  name: String!
+  variants: [String!]!
+}
+
+type LinearIssue {
+  id: Int!
+  linearId: String!
+  identifier: String!
+  title: String!
+  description: String
+  url: String!
+  stateName: String!
+  stateType: String!
+  priority: Int
+  teamKey: String
+  assigneeName: String
+  assignedToMe: Boolean!
+  remoteCreatedAt: String
+  remoteUpdatedAt: String
+  syncedAt: String!
+  dismissedAt: String
+}
+
+type LinearIssueConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [LinearIssue!]!
+  edges: [LinearIssueEdge!]!
+}
+
+type LinearIssueEdge {
+  cursor: String!
+  node: LinearIssue!
+}
+
+type Mutation {
+  _ping: String
+  createTodo(title: String!, description: String): Todo!
+  updateTodo(id: Int!, title: String, description: String): Todo!
+  setTodoStatus(id: Int!, status: TodoStatusEnum!, blockedReason: String): Todo!
+  planForToday(todoId: Int!): TodoDayPlan!
+  unplanForToday(todoId: Int!): Boolean!
+  reorderDayPlan(date: String!, todoIds: [Int!]!): [TodoDayPlan!]!
+  carryOverUnfinished(from: String!, to: String!): [TodoDayPlan!]!
+  addTag(todoId: Int!, slug: String!): Todo!
+  removeTag(todoId: Int!, slug: String!): Todo!
+  todoFromPullRequest(pullRequestId: Int!, planToday: Boolean!): Todo!
+  linkPullRequest(todoId: Int!, pullRequestId: Int!, relation: LinkRelationEnum!): Todo!
+  dismissPullRequest(id: Int!): PullRequest!
+  todoFromLinearIssue(linearIssueId: Int!, planToday: Boolean!): Todo!
+  linkLinearIssue(todoId: Int!, linearIssueId: Int!): Todo!
+  syncLinear: SyncState!
+  syncGithub: SyncState!
+}
+
+type PageInfo {
+  hasPreviousPage: Boolean!
+  hasNextPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+type PaginationInfo {
+  pages: Int!
+  current: Int!
+  offset: Int!
+  total: Int!
+}
+
+type PullRequest {
+  id: Int!
+  provider: String!
+  owner: String!
+  repo: String!
+  number: Int!
+  title: String!
+  url: String!
+  author: String
+  state: String!
+  reviewRequested: Boolean!
+  authoredByMe: Boolean!
+  remoteCreatedAt: String
+  remoteUpdatedAt: String
+  syncedAt: String!
+  dismissedAt: String
+}
+
+type PullRequestConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [PullRequest!]!
+  edges: [PullRequestEdge!]!
+}
+
+type PullRequestEdge {
+  cursor: String!
+  node: PullRequest!
+}
+
+type Query {
+  todo(filters: TodoFilterInput, having: TodoHavingInput, orderBy: TodoOrderInput, pagination: PaginationInput): TodoConnection!
+  tag(filters: TagFilterInput, having: TagHavingInput, orderBy: TagOrderInput, pagination: PaginationInput): TagConnection!
+  todoTag(filters: TodoTagFilterInput, having: TodoTagHavingInput, orderBy: TodoTagOrderInput, pagination: PaginationInput): TodoTagConnection!
+  todoDayPlan(filters: TodoDayPlanFilterInput, having: TodoDayPlanHavingInput, orderBy: TodoDayPlanOrderInput, pagination: PaginationInput): TodoDayPlanConnection!
+  todoEvent(filters: TodoEventFilterInput, having: TodoEventHavingInput, orderBy: TodoEventOrderInput, pagination: PaginationInput): TodoEventConnection!
+  pullRequest(filters: PullRequestFilterInput, having: PullRequestHavingInput, orderBy: PullRequestOrderInput, pagination: PaginationInput): PullRequestConnection!
+  todoPullRequest(filters: TodoPullRequestFilterInput, having: TodoPullRequestHavingInput, orderBy: TodoPullRequestOrderInput, pagination: PaginationInput): TodoPullRequestConnection!
+  linearIssue(filters: LinearIssueFilterInput, having: LinearIssueHavingInput, orderBy: LinearIssueOrderInput, pagination: PaginationInput): LinearIssueConnection!
+  todoLinearIssue(filters: TodoLinearIssueFilterInput, having: TodoLinearIssueHavingInput, orderBy: TodoLinearIssueOrderInput, pagination: PaginationInput): TodoLinearIssueConnection!
+  syncState(filters: SyncStateFilterInput, having: SyncStateHavingInput, orderBy: SyncStateOrderInput, pagination: PaginationInput): SyncStateConnection!
+  dailyReview(date: String!): DailyReview!
+  _sea_orm_entity_metadata(table_name: String!): Table!
+}
+
+type SyncState {
+  source: String!
+  cursor: String
+  lastSyncedAt: String
+  lastStatus: String!
+  lastError: String
+}
+
+type SyncStateConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [SyncState!]!
+  edges: [SyncStateEdge!]!
+}
+
+type SyncStateEdge {
+  cursor: String!
+  node: SyncState!
+}
+
+type Table {
+  columns: [Column!]!
+  primary_key: [String!]!
+  comment: String
+}
+
+type Tag {
+  id: Int!
+  slug: String!
+  name: String!
+  color: String
+  createdAt: String!
+  todoTag(filters: TodoTagFilterInput, orderBy: TodoTagOrderInput, pagination: PaginationInput): TodoTagConnection!
+  todo(filters: TodoFilterInput, orderBy: TodoOrderInput, pagination: PaginationInput): TodoConnection!
+}
+
+type TagConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [Tag!]!
+  edges: [TagEdge!]!
+}
+
+type TagEdge {
+  cursor: String!
+  node: Tag!
+}
+
+type Todo {
+  id: Int!
+  title: String!
+  description: String
+  status: String!
+  blockedReason: String
+  sortKey: Int!
+  createdAt: String!
+  updatedAt: String!
+  startedAt: String
+  closedAt: String
+  todoDayPlan(filters: TodoDayPlanFilterInput, orderBy: TodoDayPlanOrderInput, pagination: PaginationInput): TodoDayPlanConnection!
+  todoEvent(filters: TodoEventFilterInput, orderBy: TodoEventOrderInput, pagination: PaginationInput): TodoEventConnection!
+  todoTag(filters: TodoTagFilterInput, orderBy: TodoTagOrderInput, pagination: PaginationInput): TodoTagConnection!
+  tag(filters: TagFilterInput, orderBy: TagOrderInput, pagination: PaginationInput): TagConnection!
+}
+
+type TodoConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [Todo!]!
+  edges: [TodoEdge!]!
+}
+
+type TodoDayPlan {
+  id: Int!
+  planDate: String!
+  todoId: Int!
+  position: Int!
+  carriedOver: Boolean!
+  addedAt: String!
+  removedAt: String
+  todo: Todo
+}
+
+type TodoDayPlanConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [TodoDayPlan!]!
+  edges: [TodoDayPlanEdge!]!
+}
+
+type TodoDayPlanEdge {
+  cursor: String!
+  node: TodoDayPlan!
+}
+
+type TodoEdge {
+  cursor: String!
+  node: Todo!
+}
+
+type TodoEvent {
+  id: Int!
+  todoId: Int!
+  kind: String!
+  field: String
+  oldValue: String
+  newValue: String
+  actor: String!
+  occurredAt: String!
+  logicalDate: String!
+  todo: Todo
+}
+
+type TodoEventConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [TodoEvent!]!
+  edges: [TodoEventEdge!]!
+}
+
+type TodoEventEdge {
+  cursor: String!
+  node: TodoEvent!
+}
+
+type TodoLinearIssue {
+  todoId: Int!
+  linearIssueId: Int!
+  createdAt: String!
+  linearIssue: LinearIssue
+  todo: Todo
+}
+
+type TodoLinearIssueConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [TodoLinearIssue!]!
+  edges: [TodoLinearIssueEdge!]!
+}
+
+type TodoLinearIssueEdge {
+  cursor: String!
+  node: TodoLinearIssue!
+}
+
+type TodoPullRequest {
+  todoId: Int!
+  pullRequestId: Int!
+  relation: String!
+  createdAt: String!
+  pullRequest: PullRequest
+  todo: Todo
+}
+
+type TodoPullRequestConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [TodoPullRequest!]!
+  edges: [TodoPullRequestEdge!]!
+}
+
+type TodoPullRequestEdge {
+  cursor: String!
+  node: TodoPullRequest!
+}
+
+type TodoTag {
+  todoId: Int!
+  tagId: Int!
+  createdAt: String!
+  tag: Tag
+  todo: Todo
+}
+
+type TodoTagConnection {
+  pageInfo: PageInfo!
+  paginationInfo: PaginationInfo
+  nodes: [TodoTag!]!
+  edges: [TodoTagEdge!]!
+}
+
+type TodoTagEdge {
+  cursor: String!
+  node: TodoTag!
+}
+
