@@ -6,7 +6,6 @@ let
   projectRoot = builtins.toString ./.;
   migrationDir = "crates/migration";
   serverDir = ./crates/server;
-  entityDir = "crates/entity/src";
 in
 {
   # https://devenv.sh/packages/
@@ -78,11 +77,17 @@ in
     "db:fresh" = {
       exec = "rm -f db.sqlite db.sqlite-* && cargo run -p migration -- fresh";
     };
-    # Regenerate entities from the live schema. NOTE: this overwrites the
-    # hand-maintained enum typing in crates/entity/src — re-apply the
-    # ActiveEnum column types and the sea_orm_active_enums module afterward.
+    # Regenerate entities per-domain from the live schema. Each domain crate
+    # owns its entities. NOTE: this overwrites hand-maintained enum typing —
+    # re-apply the ActiveEnum column types and enums.rs afterward.
     "gen:entities" = {
-      exec = "sea-orm-cli generate entity -o ${entityDir} --with-serde both --seaography";
+      exec = ''
+        sea-orm-cli generate entity -o crates/todo/src/entity --with-serde both --model-extra-derives 'async_graphql::SimpleObject' --seaography
+        sea-orm-cli generate entity -o crates/github/src/entity --with-serde both --model-extra-derives 'async_graphql::SimpleObject' --seaography
+        sea-orm-cli generate entity -o crates/linear/src/entity --with-serde both --model-extra-derives 'async_graphql::SimpleObject' --seaography
+        sea-orm-cli generate entity -o crates/links/src/entity --with-serde both --seaography
+        sea-orm-cli generate entity -o crates/sync-state/src/entity --with-serde both --model-extra-derives 'async_graphql::SimpleObject' --seaography
+      '';
       after = [ "db:migrate" ];
     };
     "server:run" = {
