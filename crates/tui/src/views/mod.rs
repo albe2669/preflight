@@ -233,7 +233,7 @@ pub async fn handle_inline_edit(
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
     tx: &mpsc::Sender<crate::AppMsg>,
-    id: i64,
+    id: i32,
     _input: &str,
 ) -> anyhow::Result<bool> {
     use ratatui::crossterm::event::KeyCode::*;
@@ -264,7 +264,7 @@ pub async fn handle_inline_edit(
             let t = tx.clone();
             let title2 = title.clone();
             tokio::spawn(async move {
-                match c.update_todo(id, Some(&title2), None).await {
+                match c.update_todo(id, Some(&title2)).await {
                     Ok(_) => {
                         let _ = t
                             .send(crate::AppMsg::Toast(ToastKind::Success, "saved".into()))
@@ -312,18 +312,18 @@ pub async fn handle_reorder(
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
     tx: &mpsc::Sender<crate::AppMsg>,
-    source_id: i64,
+    source_id: i32,
 ) -> anyhow::Result<bool> {
     use ratatui::crossterm::event::KeyCode::*;
     match key {
         Char('J') | Down => {
             // Move the source row down.
-            let mut ids: Vec<i64> = app
+            let mut ids: Vec<i32> = app
                 .data
                 .plan
                 .iter()
                 .filter(|p| p.removed_at.is_none())
-                .map(|p| p.todo.id)
+                .filter_map(|p| p.todo.as_ref().map(|t| t.id))
                 .collect();
             if let Some(pos) = ids.iter().position(|&i| i == source_id) {
                 if pos + 1 < ids.len() {
@@ -340,12 +340,12 @@ pub async fn handle_reorder(
             });
         }
         Char('K') | Up => {
-            let mut ids: Vec<i64> = app
+            let mut ids: Vec<i32> = app
                 .data
                 .plan
                 .iter()
                 .filter(|p| p.removed_at.is_none())
-                .map(|p| p.todo.id)
+                .filter_map(|p| p.todo.as_ref().map(|t| t.id))
                 .collect();
             if let Some(pos) = ids.iter().position(|&i| i == source_id) {
                 if pos > 0 {
@@ -448,7 +448,7 @@ pub async fn handle_detail(
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
     tx: &mpsc::Sender<crate::AppMsg>,
-    id: i64,
+    id: i32,
 ) -> anyhow::Result<bool> {
     detail::handle(app, key, client, tx, id).await
 }

@@ -147,7 +147,7 @@ pub async fn handle(
     key: KeyCode,
     client: &gql::Client,
     tx: &mpsc::Sender<crate::AppMsg>,
-    id: i64,
+    id: i32,
 ) -> anyhow::Result<bool> {
     match key {
         KeyCode::Esc => {

@@ -49,15 +49,19 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         .filter(|p| p.removed_at.is_none())
         .collect();
 
-    for (i, row) in active_rows.iter().enumerate() {
+    // Skip rows where the todo relation didn't resolve.
+    let active_rows: Vec<(&crate::gql::PlanRow, &crate::gql::Todo)> = active_rows
+        .iter()
+        .filter_map(|p| p.todo.as_ref().map(|t| (*p, t)))
+        .collect();
+    for (i, (row, td)) in active_rows.iter().enumerate() {
         let is_cursor = i == app.cursor
             && matches!(
                 app.mode,
                 Mode::Navigate | Mode::Reorder { .. } | Mode::InlineEdit { .. }
             );
-        let is_editing = matches!(&app.mode, Mode::InlineEdit { id, .. } if *id == row.todo.id);
-        let is_reorder =
-            matches!(&app.mode, Mode::Reorder { source_id } if *source_id == row.todo.id);
+        let is_editing = matches!(&app.mode, Mode::InlineEdit { id, .. } if *id == td.id);
+        let is_reorder = matches!(&app.mode, Mode::Reorder { source_id } if *source_id == td.id);
 
         if is_editing {
             // Inline edit field.
@@ -99,8 +103,8 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             Span::raw(" ")
         };
 
-        let (sglyph, scolor) = frame::status_glyph(&row.todo.status);
-        let title_style = match row.todo.status.as_str() {
+        let (sglyph, scolor) = frame::status_glyph(&td.status);
+        let title_style = match td.status.as_str() {
             "started" => Style::default()
                 .fg(Palette::TEXT)
                 .add_modifier(Modifier::BOLD),
@@ -126,7 +130,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             Style::default().fg(scolor),
         ));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(row.todo.title.clone(), title_style));
+        spans.push(Span::styled(td.title.clone(), title_style));
 
         let line = Line::from(spans);
         if is_cursor {
@@ -136,8 +140,8 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         }
 
         // Blocked reason continuation line.
-        if row.todo.status == "blocked" {
-            if let Some(ref reason) = row.todo.blocked_reason {
+        if td.status == "blocked" {
+            if let Some(ref reason) = td.blocked_reason {
                 items.push(ListItem::new(frame::blocked_reason_line(reason)));
             }
         }
@@ -150,18 +154,20 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             Style::default().fg(Palette::DIM),
         ))));
         for row in unplanned {
-            let (sglyph, scolor) = frame::status_glyph(&row.todo.status);
-            items.push(ListItem::new(Line::from(vec![
-                Span::raw("   –  "),
-                Span::styled(sglyph.to_string(), Style::default().fg(scolor)),
-                Span::raw(" "),
-                Span::styled(
-                    row.todo.title.clone(),
-                    Style::default()
-                        .fg(Palette::GHOST)
-                        .add_modifier(Modifier::CROSSED_OUT),
-                ),
-            ])));
+            if let Some(td) = &row.todo {
+                let (sglyph, scolor) = frame::status_glyph(&td.status);
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw("   –  "),
+                    Span::styled(sglyph.to_string(), Style::default().fg(scolor)),
+                    Span::raw(" "),
+                    Span::styled(
+                        td.title.clone(),
+                        Style::default()
+                            .fg(Palette::GHOST)
+                            .add_modifier(Modifier::CROSSED_OUT),
+                    ),
+                ])));
+            }
         }
     }
 
@@ -230,35 +236,35 @@ pub async fn handle_navigate(
             };
         }
         KeyCode::Char('e') | KeyCode::Enter => {
-            if let Some(todo) = app.today_plan().get(app.cursor) {
+            if let Some(td) = app.today_plan().get(app.cursor) {
                 app.mode = Mode::InlineEdit {
-                    id: todo.id,
-                    input: todo.title.clone(),
+                    id: td.id,
+                    input: td.title.clone(),
                 };
             }
         }
         KeyCode::Char('x') => {
-            if let Some(todo) = app.today_plan().get(app.cursor) {
+            if let Some(td) = app.today_plan().get(app.cursor) {
                 app.mode = Mode::Confirm {
-                    action: ConfirmAction::Unplan { id: todo.id },
+                    action: ConfirmAction::Unplan { id: td.id },
                 };
             }
         }
         KeyCode::Char('J') => {
-            if let Some(todo) = app.today_plan().get(app.cursor) {
-                app.mode = Mode::Reorder { source_id: todo.id };
+            if let Some(td) = app.today_plan().get(app.cursor) {
+                app.mode = Mode::Reorder { source_id: td.id };
             }
         }
         KeyCode::Char(' ') => {
             // Cycle status: todo -> started -> blocked -> done -> cancelled -> todo
-            if let Some(todo) = app.today_plan().get(app.cursor) {
-                let next = match todo.status.as_str() {
+            if let Some(td) = app.today_plan().get(app.cursor) {
+                let next = match td.status.as_str() {
                     "todo" => "started",
                     "started" => "done",
                     "done" => "todo",
                     _ => "todo",
                 };
-                let id = todo.id;
+                let id = td.id;
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {

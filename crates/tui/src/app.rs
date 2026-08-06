@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use crate::gql::{DailyReview, FetchAll, PullRequest, SyncState, Tag, Todo, TodoEvent};
+use crate::gql::{DailyReview, PullRequest, SyncState, Tag, Todo, TodoEvent};
 
 /// The five top-level views plus the detail overlay.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,20 +44,20 @@ impl View {
 pub enum Mode {
     Navigate,
     InlineCreate { input: String },
-    InlineEdit { id: i64, input: String },
+    InlineEdit { id: i32, input: String },
     Search { input: String },
-    Reorder { source_id: i64 },
+    Reorder { source_id: i32 },
     Confirm { action: ConfirmAction },
-    Detail { id: i64 },
+    Detail { id: i32 },
 }
 
 /// Destructive actions that require confirmation per the design.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConfirmAction {
     CarryOver { from: String, to: String },
-    Unplan { id: i64 },
-    Cancel { id: i64 },
-    DismissPr { id: i64 },
+    Unplan { id: i32 },
+    Cancel { id: i32 },
+    DismissPr { id: i32 },
 }
 
 /// A transient toast: success fades after 2.5s, errors are sticky.
@@ -75,17 +75,41 @@ pub enum ToastKind {
     Error,
 }
 
+/// Flattened data fetched from the backend. Converted from the cynic
+/// `FetchAll` QueryFragment when data arrives in the event loop.
+#[derive(Clone, Debug, Default)]
+pub struct AppData {
+    pub todos: Vec<Todo>,
+    pub plan: Vec<crate::gql::PlanRow>,
+    pub pulls: Vec<PullRequest>,
+    pub linears: Vec<crate::gql::LinearIssue>,
+    pub sync: Vec<SyncState>,
+}
+
+impl AppData {
+    /// Convert from the cynic `FetchAll` query result.
+    pub fn from_fetch_all(f: crate::gql::FetchAll) -> Self {
+        Self {
+            todos: f.todo.nodes,
+            plan: f.todo_day_plan.nodes,
+            pulls: f.pull_request.nodes,
+            linears: f.linear_issue.nodes,
+            sync: f.sync_state.nodes,
+        }
+    }
+}
+
 /// Global app state. Owned by the event loop, mutated by key handlers.
 pub struct App {
     pub view: View,
     pub mode: Mode,
-    pub data: FetchAll,
+    pub data: AppData,
     pub review: Option<DailyReview>,
     pub review_date: chrono::NaiveDate,
     pub logical_date: chrono::NaiveDate,
-    pub day_start_hour: i64,
+    pub day_start_hour: i32,
     pub cursor: usize,
-    pub marked: HashSet<i64>,
+    pub marked: HashSet<i32>,
     pub toast: Option<Toast>,
     pub spinner: u8,
     pub show_dismissed: bool,
@@ -105,7 +129,7 @@ impl Default for App {
         Self {
             view: View::Today,
             mode: Mode::Navigate,
-            data: FetchAll::default(),
+            data: AppData::default(),
             review: None,
             review_date: chrono::Local::now().date_naive() - chrono::Duration::days(1),
             logical_date: chrono::Local::now().date_naive(),
@@ -128,7 +152,7 @@ impl App {
             .plan
             .iter()
             .filter(|p| p.removed_at.is_none())
-            .map(|p| &p.todo)
+            .filter_map(|p| p.todo.as_ref())
             .collect()
     }
 
@@ -143,12 +167,13 @@ impl App {
 
     /// All todos NOT on today's plan, grouped by status for Backlog.
     pub fn backlog(&self) -> Vec<&Todo> {
-        let on_plan: HashSet<i64> = self
+        let on_plan: HashSet<i32> = self
             .data
             .plan
             .iter()
             .filter(|p| p.removed_at.is_none())
-            .map(|p| p.todo.id)
+            .filter_map(|p| p.todo.as_ref())
+            .map(|t| t.id)
             .collect();
         self.data
             .todos

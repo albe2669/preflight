@@ -40,7 +40,7 @@ pub async fn run(endpoint: &str) -> anyhow::Result<()> {
     let fetched = client.fetch_all(&date_str).await;
     let mut app = App::default();
     match fetched {
-        Ok(d) => app.data = d,
+        Ok(d) => app.data = crate::app::AppData::from_fetch_all(d),
         Err(e) => app.set_error(format!("connect failed: {e}")),
     }
 
@@ -97,7 +97,7 @@ async fn run_loop(
         // Drain async messages.
         while let Ok(msg) = rx.try_recv() {
             match msg {
-                AppMsg::FetchAll(d) => app.data = d,
+                AppMsg::FetchAll(d) => app.data = crate::app::AppData::from_fetch_all(d),
                 AppMsg::DailyReview(r) => app.review = Some(r),
                 AppMsg::Toast(k, m) => app.set_toast(k, m),
                 AppMsg::Refresh => {
