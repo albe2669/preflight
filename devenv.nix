@@ -85,7 +85,7 @@ in
       exec = "sea-orm-cli generate entity -o ${entityDir} --with-serde both --seaography";
       after = [ "db:migrate" ];
     };
-    "run" = {
+    "server:run" = {
       exec = "cargo run -p server";
     };
   };
