@@ -20,6 +20,13 @@ use crate::gql;
 use crate::theme::Palette;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+    let carried_ids: std::collections::HashSet<i32> = app
+        .data
+        .plan
+        .iter()
+        .filter(|p| p.carried_over && p.removed_at.is_none())
+        .filter_map(|p| p.todo.as_ref().map(|t| t.id))
+        .collect();
     let plan = app.today_plan();
     let unplanned = app.today_unplanned();
 
@@ -102,11 +109,11 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         ));
         let mut no_match_items = vec![ListItem::new(no_match)];
         no_match_items.extend(trailing);
-        frame::render_grouped_list(f, area, &[], app.cursor, no_match_items);
+        frame::render_grouped_list(f, area, &[], app.cursor, &carried_ids, no_match_items);
         return;
     }
 
-    frame::render_grouped_list(f, area, &groups, app.cursor, trailing);
+    frame::render_grouped_list(f, area, &groups, app.cursor, &carried_ids, trailing);
 }
 
 pub(crate) async fn handle_navigate(

@@ -36,11 +36,25 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             format!("  no matches for \"{filter}\""),
             Style::default().fg(Palette::DIM),
         )));
-        frame::render_grouped_list(f, area, &[], app.cursor, vec![no_match]);
+        frame::render_grouped_list(
+            f,
+            area,
+            &[],
+            app.cursor,
+            &std::collections::HashSet::new(),
+            vec![no_match],
+        );
         return;
     }
 
-    frame::render_grouped_list(f, area, &groups, app.cursor, vec![]);
+    frame::render_grouped_list(
+        f,
+        area,
+        &groups,
+        app.cursor,
+        &std::collections::HashSet::new(),
+        vec![],
+    );
 }
 
 pub(crate) async fn handle_navigate(

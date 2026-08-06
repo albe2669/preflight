@@ -470,6 +470,7 @@ pub fn render_grouped_list<'a>(
     area: Rect,
     groups: &[GroupedSection<'a>],
     cursor: usize,
+    carried_ids: &std::collections::HashSet<i32>,
     trailing_items: Vec<ListItem<'a>>,
 ) -> ListState {
     let mut items: Vec<ListItem<'a>> = Vec::new();
@@ -497,7 +498,7 @@ pub fn render_grouped_list<'a>(
 
         for todo in group.rows.iter() {
             let is_cursor = row_idx == cursor;
-            let line = grouped_todo_line(todo, is_cursor);
+            let line = grouped_todo_line(todo, is_cursor, carried_ids.contains(&todo.id));
             if is_cursor {
                 items.push(ListItem::new(line).style(Style::default().bg(Palette::ROW_HIGHLIGHT)));
             } else {
@@ -527,7 +528,7 @@ pub fn render_grouped_list<'a>(
 }
 
 /// Format a todo row for the grouped layout (no position column).
-fn grouped_todo_line(todo: &Todo, is_cursor: bool) -> Line<'_> {
+fn grouped_todo_line(todo: &Todo, is_cursor: bool, carried: bool) -> Line<'_> {
     let (glyph, color) = status_glyph(&todo.status);
     let marker = if is_cursor {
         Span::styled(
@@ -547,13 +548,21 @@ fn grouped_todo_line(todo: &Todo, is_cursor: bool) -> Line<'_> {
             .add_modifier(Modifier::CROSSED_OUT),
         _ => Style::default().fg(Palette::TEXT),
     };
-    Line::from(vec![
+    let mut spans = vec![
         marker,
         Span::raw("  "),
         Span::styled(glyph.to_string(), Style::default().fg(color)),
         Span::raw(" "),
-        Span::styled(todo.title.clone(), title_style),
-    ])
+    ];
+    if carried {
+        spans.push(Span::styled(
+            Glyph::CARRIED.to_string(),
+            Style::default().fg(Palette::DIM),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(todo.title.clone(), title_style));
+    Line::from(spans)
 }
 
 /// Render the info sidebar for the highlighted todo (D4). Reads the todo
