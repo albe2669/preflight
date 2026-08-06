@@ -133,7 +133,7 @@ async fn run_loop(
 }
 
 /// Handle a key. Returns Ok(true) to quit.
-async fn handle_key(
+pub(crate) async fn handle_key(
     app: &mut App,
     key: KeyCode,
     client: &gql::Client,
@@ -164,13 +164,20 @@ async fn handle_key(
             return Ok(false);
         }
         Esc => {
-            if let Mode::SidebarEdit { .. } = app.mode {
-                // Let the handler own the two-Esc logic
-                return Ok(false);
+            match app.mode {
+                Mode::Navigate => {
+                    app.toast = None;
+                    return Ok(false);
+                }
+                Mode::SidebarEdit { .. } => {
+                    // Let the handler own the Esc logic
+                }
+                _ => {
+                    app.mode = Mode::Navigate;
+                    app.toast = None;
+                    return Ok(false);
+                }
             }
-            app.mode = Mode::Navigate;
-            app.toast = None;
-            return Ok(false);
         }
         _ => {}
     }

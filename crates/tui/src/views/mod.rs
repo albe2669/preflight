@@ -1451,3 +1451,1059 @@ mod render_tests {
         assert!(output.contains('▲'), "should show error glyph");
     }
 }
+#[cfg(test)]
+mod sidebar_edit_tests {
+    use crate::app::tests::{make_plan_row, make_todo};
+    use crate::app::{App, LinkKind, Mode, SidebarField, ToastKind};
+    use crate::gql;
+    use crate::test_support::buffer_text;
+    use ratatui::crossterm::event::KeyCode;
+    use ratatui::{Terminal, backend::TestBackend};
+    use tokio::sync::mpsc;
+
+    // -- helpers --
+
+    fn test_client() -> (gql::Client, mpsc::Sender<crate::AppMsg>) {
+        let client = gql::Client::new("http://127.0.0.1:0");
+        let (tx, _rx) = mpsc::channel::<crate::AppMsg>(32);
+        (client, tx)
+    }
+
+    fn setup_app_with_todo() -> App {
+        let mut app = App::default();
+        app.data.plan = vec![make_plan_row(1, 0, make_todo(1, "My Task", "todo"), None)];
+        app.data.todos = vec![make_todo(1, "My Task", "todo")];
+        app.cursor = 0;
+        app.content_width = 120;
+        app
+    }
+
+    fn enter_sidebar_edit(app: &mut App) {
+        app.mode = Mode::SidebarEdit {
+            id: 1,
+            field: SidebarField::Description,
+            input_active: false,
+            desc_input: String::new(),
+            desc_scroll: 0,
+            tag_input: String::new(),
+            link_kind: LinkKind::Pr,
+            link_selection: 0,
+            scroll: 0,
+        };
+    }
+
+    fn render_full(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| crate::views::render(f, app)).unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    // -- 5.1 r enters InlineEdit; Enter commits; Esc reverts --
+
+    #[tokio::test]
+    async fn test_r_enters_inline_edit_seeded_with_title() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        crate::handle_key(&mut app, KeyCode::Char('r'), &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::InlineEdit { id, input } if *id == 1 && input == "My Task"),
+            "should enter InlineEdit with id=1 and input seeded from title"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_r_on_empty_plan_does_nothing() {
+        let (client, tx) = test_client();
+        let mut app = App::default();
+
+        crate::handle_key(&mut app, KeyCode::Char('r'), &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, Mode::Navigate);
+    }
+
+    #[tokio::test]
+    async fn test_esc_from_inline_edit_returns_to_navigate() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        // Enter inline edit
+        crate::handle_key(&mut app, KeyCode::Char('r'), &client, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(app.mode, Mode::InlineEdit { .. }));
+        // Esc returns to Navigate
+        crate::handle_key(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, Mode::Navigate);
+    }
+
+    #[tokio::test]
+    async fn test_enter_from_inline_edit_commits_and_returns_to_navigate() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        crate::handle_key(&mut app, KeyCode::Char('r'), &client, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(app.mode, Mode::InlineEdit { .. }));
+        // Enter commits (mutation runs async) and returns to Navigate
+        crate::handle_key(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, Mode::Navigate);
+    }
+
+    // -- 5.2 e/Enter enter SidebarEdit; Esc exits discarding input --
+
+    #[tokio::test]
+    async fn test_e_enters_sidebar_edit() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        crate::handle_key(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { id, field, .. } if *id == 1 && *field == SidebarField::Description),
+            "should enter SidebarEdit for id=1, focused on Description"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_enter_enters_sidebar_edit() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        crate::handle_key(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { id, .. } if *id == 1),
+            "Enter should also enter SidebarEdit"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_esc_from_sidebar_edit_returns_to_navigate() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        crate::handle_key(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(app.mode, Mode::SidebarEdit { .. }));
+        crate::handle_key(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, Mode::Navigate);
+    }
+
+    #[tokio::test]
+    async fn test_sidebar_edit_starts_with_scroll_zero() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        crate::handle_key(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { scroll, .. } = &app.mode {
+            assert_eq!(*scroll, 0, "scroll should be reset on entry");
+        } else {
+            panic!("expected SidebarEdit mode");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sidebar_edit_seeds_desc_input_from_todo_description() {
+        let mut app = setup_app_with_todo();
+        app.data.todos[0].description = Some("existing description".to_string());
+        if let Some(todo) = &mut app.data.plan[0].todo {
+            todo.description = Some("existing description".to_string());
+        }
+        let (client, tx) = test_client();
+        crate::handle_key(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { desc_input, .. } = &app.mode {
+            assert_eq!(desc_input, "existing description");
+        } else {
+            panic!("expected SidebarEdit mode");
+        }
+    }
+
+    // -- 5.4 narrow terminal toast --
+
+    #[tokio::test]
+    async fn test_narrow_terminal_prevents_sidebar_edit() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        app.content_width = 80; // below 100
+        crate::handle_key(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            app.mode,
+            Mode::Navigate,
+            "should stay in Navigate on narrow terminal"
+        );
+        assert!(
+            app.toast.is_some(),
+            "should show a toast when terminal is too narrow"
+        );
+        let toast = app.toast.as_ref().unwrap();
+        assert_eq!(toast.kind, ToastKind::Error);
+        assert!(
+            toast.message.contains("narrow"),
+            "toast should mention narrow terminal"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_narrow_terminal_blocks_enter_key_too() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        app.content_width = 99;
+        crate::handle_key(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, Mode::Navigate);
+        assert!(app.toast.is_some());
+    }
+
+    // -- 5.5 field navigation (Tab/j/k) --
+
+    #[tokio::test]
+    async fn test_tab_cycles_fields_forward() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+
+        // Description -> Links
+        let (client, _) = test_client();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(*field, SidebarField::Links);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+
+        // Links -> Tags
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(*field, SidebarField::Tags);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+
+        // Tags -> Description (wraps)
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(*field, SidebarField::Description);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_j_cycles_fields_forward_same_as_tab() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('j'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(*field, SidebarField::Links, "j should advance like Tab");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k_cycles_fields_backward() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Description -> Tags (backward)
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('k'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(*field, SidebarField::Tags);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_back_tab_cycles_fields_backward() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Description -> Tags (backward)
+        super::handle_sidebar_edit(&mut app, KeyCode::BackTab, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(*field, SidebarField::Tags);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_field_nav_resets_scroll() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        // Set scroll to something nonzero
+        if let Mode::SidebarEdit { scroll, .. } = &mut app.mode {
+            *scroll = 5;
+        }
+        let (client, _) = test_client();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { scroll, .. } = &app.mode {
+            assert_eq!(*scroll, 0, "scroll should reset to 0 on field nav");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_field_nav_does_not_move_list_cursor() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        app.cursor = 0;
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('j'), &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            app.cursor, 0,
+            "list cursor should not move during sidebar field nav"
+        );
+    }
+
+    // -- description field: input, commit, scroll --
+
+    #[tokio::test]
+    async fn test_enter_activates_input_on_description() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        assert!(
+            !matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if *input_active),
+            "input_active should be false on entry"
+        );
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if *input_active),
+            "Enter should activate input"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_description_char_input() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Activate input
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        // Type some chars
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('H'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('i'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { desc_input, .. } = &app.mode {
+            assert_eq!(desc_input, "Hi");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_description_backspace() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('H'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('i'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Backspace, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { desc_input, .. } = &app.mode {
+            assert_eq!(desc_input, "H");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_description_enter_deactivates_input() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if *input_active));
+        // Commit with Enter
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\n'), &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if !*input_active),
+            "Enter on description should deactivate input (commit)"
+        );
+        // Mode should still be SidebarEdit
+        assert!(matches!(app.mode, Mode::SidebarEdit { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_description_esc_deactivates_input() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if *input_active));
+        super::handle_sidebar_edit(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if !*input_active),
+            "Esc should deactivate input"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_description_down_increases_scroll() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Down, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { desc_scroll, .. } = &app.mode {
+            assert_eq!(*desc_scroll, 1);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+        super::handle_sidebar_edit(&mut app, KeyCode::Down, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { desc_scroll, .. } = &app.mode {
+            assert_eq!(*desc_scroll, 2);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_description_up_decreases_scroll_saturating() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        // Scroll is 0, Up should saturate at 0
+        super::handle_sidebar_edit(&mut app, KeyCode::Up, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { desc_scroll, .. } = &app.mode {
+            assert_eq!(*desc_scroll, 0);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    // -- tags: type, Enter adds --
+
+    #[tokio::test]
+    async fn test_tag_input_typing() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Nav to Tags
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        // Activate input
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        // Type a tag
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('a'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('b'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { tag_input, .. } = &app.mode {
+            assert_eq!(tag_input, "ab");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tag_enter_clears_input_and_deactivates() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Nav to Tags
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('s'), &client, &tx)
+            .await
+            .unwrap();
+        // Commit
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit {
+            tag_input,
+            input_active,
+            ..
+        } = &app.mode
+        {
+            assert!(tag_input.is_empty(), "tag input should be cleared");
+            assert!(!input_active, "input should be deactivated");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tag_backspace() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('a'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Backspace, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { tag_input, .. } = &app.mode {
+            assert!(tag_input.is_empty());
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    // -- links: j/k navigation, Tab switches kind, x detach, Enter attach --
+
+    #[tokio::test]
+    async fn test_links_j_moves_selection_down() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Nav to Links
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        // Activate
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        // j (no links in data, selection stays at 0)
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('j'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { link_selection, .. } = &app.mode {
+            assert_eq!(*link_selection, 0, "selection should stay 0 with no links");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_links_k_selection_saturates_at_zero() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('k'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { link_selection, .. } = &app.mode {
+            assert_eq!(*link_selection, 0);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_links_down_moves_selection_down() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Down, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { link_selection, .. } = &app.mode {
+            assert_eq!(*link_selection, 0, "Down also moves link selection");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_links_up_moves_selection_up() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        // Set link_selection to 1
+        if let Mode::SidebarEdit { link_selection, .. } = &mut app.mode {
+            *link_selection = 1;
+        }
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Up, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { link_selection, .. } = &app.mode {
+            assert_eq!(*link_selection, 0);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_links_tab_switches_kind() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Nav to Links
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { link_kind, .. } if *link_kind == LinkKind::Pr),
+            "default link kind should be Pr"
+        );
+        // Tab within links input toggles kind
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { link_kind, .. } = &app.mode {
+            assert_eq!(*link_kind, LinkKind::Linear, "Tab should switch to Linear");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+        // Tab again wraps back to Pr
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { link_kind, .. } = &app.mode {
+            assert_eq!(*link_kind, LinkKind::Pr, "Tab should wrap back to Pr");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_links_enter_deactivates_input() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if !*input_active),
+            "Enter on Links should deactivate input"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_links_esc_deactivates_input() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if !*input_active),
+            "Esc on Links should deactivate input"
+        );
+    }
+
+    // -- render tests: edit form vs read card; LINKS region --
+
+    #[test]
+    fn test_sidebar_edit_form_shows_edit_title() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("EDIT"),
+            "sidebar should show EDIT title in edit mode"
+        );
+    }
+
+    #[test]
+    fn test_sidebar_edit_form_shows_description_header() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("DESCRIPTION"),
+            "edit form should show DESCRIPTION header"
+        );
+    }
+
+    #[test]
+    fn test_sidebar_edit_form_shows_links_header() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("LINKS"),
+            "edit form should show LINKS header"
+        );
+    }
+
+    #[test]
+    fn test_sidebar_edit_form_shows_tags_header() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(output.contains("TAGS"), "edit form should show TAGS header");
+    }
+
+    #[test]
+    fn test_sidebar_edit_form_shows_field_nav_hints() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("Tab") || output.contains("j"),
+            "edit form should show field navigation hints when input_inactive"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_shows_todo_title() {
+        let mut app = setup_app_with_todo();
+        // Navigate mode (not SidebarEdit) — sidebar shows read-only info card
+        app.mode = Mode::Navigate;
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("TODO"),
+            "read-only sidebar should show TODO title"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_shows_status_glyph() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("todo"),
+            "read-only sidebar should show todo status"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_shows_task_title() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("My Task"),
+            "read-only sidebar should show the task title"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_shows_created_date() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("created"),
+            "read-only sidebar should show created date"
+        );
+    }
+
+    #[test]
+    fn test_edit_form_description_active_shows_arrow() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        // Activate description input
+        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+            *input_active = true;
+        }
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("▸ DESCRIPTION") || output.contains("DESCRIPTION"),
+            "active description should show focused indicator"
+        );
+    }
+
+    #[test]
+    fn test_edit_form_links_active_shows_arrow() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        // Nav to Links and activate
+        if let Mode::SidebarEdit {
+            field,
+            input_active,
+            ..
+        } = &mut app.mode
+        {
+            *field = SidebarField::Links;
+            *input_active = true;
+        }
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("▸ LINKS") || output.contains("LINKS"),
+            "active links field should show focused indicator"
+        );
+    }
+
+    #[test]
+    fn test_edit_form_tags_active_shows_arrow() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        // Nav to Tags and activate
+        if let Mode::SidebarEdit {
+            field,
+            input_active,
+            ..
+        } = &mut app.mode
+        {
+            *field = SidebarField::Tags;
+            *input_active = true;
+        }
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("▸ TAGS") || output.contains("TAGS"),
+            "active tags field should show focused indicator"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_shows_links_region_with_detail() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        // Set detail data so LINKS region renders
+        app.detail_loaded_id = Some(1);
+        app.detail = Some(crate::app::DetailData {
+            tags: vec![],
+            events: vec![],
+        });
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("LINKS"),
+            "read-only sidebar should show LINKS region when detail loaded"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_links_empty_state() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        app.detail_loaded_id = Some(1);
+        app.detail = Some(crate::app::DetailData {
+            tags: vec![],
+            events: vec![],
+        });
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("No linked") || output.contains("loading"),
+            "LINKS region should show empty state or loading text"
+        );
+    }
+
+    #[test]
+    fn test_edit_form_shows_no_linked_prs_when_empty() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("No linked"),
+            "edit form should show empty links state"
+        );
+    }
+
+    #[test]
+    fn test_edit_form_shows_none_tags_when_empty() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("none"),
+            "edit form should show 'none' for empty tags"
+        );
+    }
+
+    // -- detail_loaded_id set on sidebar entry --
+
+    #[tokio::test]
+    async fn test_sidebar_entry_sets_detail_loaded_id() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        assert_eq!(app.detail_loaded_id, None);
+        crate::handle_key(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        // fetch_detail sets detail_loaded_id synchronously
+        assert_eq!(app.detail_loaded_id, Some(1));
+    }
+
+    // -- Esc double-press when input_active --
+
+    #[tokio::test]
+    async fn test_esc_twice_exits_when_input_active() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Activate input
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if *input_active));
+
+        // First Esc deactivates input
+        super::handle_sidebar_edit(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if !*input_active));
+
+        // Second Esc exits — but this goes through handle_key which routes to handle_sidebar_edit
+        // In the handler, Esc when !input_active exits to Navigate
+        crate::handle_key(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.mode, Mode::Navigate);
+    }
+}

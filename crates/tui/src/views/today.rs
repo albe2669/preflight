@@ -146,7 +146,9 @@ pub(crate) async fn handle_navigate(
             }
         }
         KeyCode::Enter | KeyCode::Char('e') => {
-            if let Some(td) = app.today_plan().get(app.cursor) {
+            if app.content_width < 100 {
+                app.set_error("terminal too narrow for sidebar");
+            } else if let Some(td) = app.today_plan().get(app.cursor) {
                 let id = td.id;
                 let desc = td.description.clone().unwrap_or_default();
                 app.mode = Mode::SidebarEdit {
