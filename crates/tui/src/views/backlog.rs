@@ -139,3 +139,72 @@ pub(crate) async fn handle_navigate(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+mod render_tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use crate::app::App;
+    use crate::app::tests::make_todo;
+    use crate::test_support::buffer_text;
+
+    fn render_backlog(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                crate::views::backlog::render(f, app, area);
+            })
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_backlog_groups_todos_by_status_with_counts() {
+        let mut app = App::default();
+        app.data.todos = vec![
+            make_todo(1, "Active task", "started"),
+            make_todo(2, "Blocked task", "blocked"),
+            make_todo(3, "Todo task", "todo"),
+            make_todo(4, "Done task", "done"),
+        ];
+        app.show_done = true;
+
+        let output = render_backlog(&mut app);
+
+        assert!(
+            output.contains("STARTED · 1"),
+            "STARTED group header missing"
+        );
+        assert!(
+            output.contains("BLOCKED · 1"),
+            "BLOCKED group header missing"
+        );
+        assert!(output.contains("TODO · 1"), "TODO group header missing");
+        assert!(output.contains("DONE · 1"), "DONE group header missing");
+    }
+
+    #[test]
+    fn test_backlog_done_hidden_when_show_done_false() {
+        let mut app = App::default();
+        app.data.todos = vec![
+            make_todo(1, "Active task", "started"),
+            make_todo(2, "Blocked task", "blocked"),
+            make_todo(3, "Todo task", "todo"),
+            make_todo(4, "Done task", "done"),
+        ];
+        app.show_done = false;
+
+        let output = render_backlog(&mut app);
+
+        assert!(
+            output.contains("DONE · 1 (collapsed — press D to expand)"),
+            "DONE group should show collapsed header"
+        );
+        assert!(
+            !output.contains("Done task"),
+            "Done todo title should NOT appear when done group is collapsed"
+        );
+    }
+}
