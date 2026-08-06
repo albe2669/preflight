@@ -50,8 +50,7 @@ impl Clock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-
+    use chrono::{TimeZone, Utc};
     fn la() -> Clock {
         Clock::new(chrono_tz::America::Los_Angeles, 4)
     }
@@ -92,6 +91,93 @@ mod tests {
         assert_eq!(
             la().logical_date(at),
             NaiveDate::from_ymd_opt(2026, 8, 4).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_clock_clamps_day_start_hour() {
+        let c = Clock::new(chrono_tz::America::Los_Angeles, -5);
+        assert_eq!(c.day_start_hour, 0);
+        let c = Clock::new(chrono_tz::America::Los_Angeles, 30);
+        assert_eq!(c.day_start_hour, 23);
+    }
+
+    #[test]
+    fn test_clock_midnight_utc() {
+        let clock = Clock::new(chrono_tz::UTC, 0);
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 0, 0, 0).unwrap();
+        assert_eq!(
+            clock.logical_date(at),
+            NaiveDate::from_ymd_opt(2026, 8, 4).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_clock_day_start_at_noon() {
+        let clock = Clock::new(chrono_tz::America::Los_Angeles, 12);
+        // 11:00 local 2026-08-04 → before noon boundary → yesterday
+        let at = Tz::America__Los_Angeles
+            .with_ymd_and_hms(2026, 8, 4, 11, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            clock.logical_date(at),
+            NaiveDate::from_ymd_opt(2026, 8, 3).unwrap()
+        );
+        // 12:00 local 2026-08-04 → at noon boundary → today
+        let at = Tz::America__Los_Angeles
+            .with_ymd_and_hms(2026, 8, 4, 12, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            clock.logical_date(at),
+            NaiveDate::from_ymd_opt(2026, 8, 4).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_clock_timezone_boundary() {
+        let clock = Clock::new(chrono_tz::Europe::London, 0);
+        // 23:00 BST 2026-08-04 = 22:00 UTC → date is 2026-08-04
+        let at = Tz::Europe__London
+            .with_ymd_and_hms(2026, 8, 4, 23, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            clock.logical_date(at),
+            NaiveDate::from_ymd_opt(2026, 8, 4).unwrap()
+        );
+        // 00:00 BST 2026-08-05 = 23:00 UTC 2026-08-04 → date is 2026-08-05
+        let at = Tz::Europe__London
+            .with_ymd_and_hms(2026, 8, 5, 0, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            clock.logical_date(at),
+            NaiveDate::from_ymd_opt(2026, 8, 5).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_clock_dst_spring_forward_no_panic() {
+        let clock = Clock::new(chrono_tz::America::Los_Angeles, 4);
+        // 01:30 local 2026-03-08 (PST, before spring forward gap) → 2026-03-07
+        let at = Tz::America__Los_Angeles
+            .with_ymd_and_hms(2026, 3, 8, 1, 30, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            clock.logical_date(at),
+            NaiveDate::from_ymd_opt(2026, 3, 7).unwrap()
+        );
+        // 08:30 local 2026-03-08 (PDT, after spring forward, after day_start_hour=4 boundary) → 2026-03-08
+        let at = Tz::America__Los_Angeles
+            .with_ymd_and_hms(2026, 3, 8, 8, 30, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            clock.logical_date(at),
+            NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()
         );
     }
 }
