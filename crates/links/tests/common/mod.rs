@@ -44,3 +44,32 @@ pub async fn seed_pr(
     };
     pr.insert(db).await.unwrap().id
 }
+
+/// Insert a linear_issue row directly via ActiveModel, return its id.
+pub async fn seed_linear_issue(
+    db: &DatabaseConnection,
+    linear_id: &str,
+    identifier: &str,
+    title: &str,
+) -> i64 {
+    let now = Utc::now().into();
+    let issue = linear::entity::linear_issue::ActiveModel {
+        id: ActiveValue::NotSet,
+        linear_id: ActiveValue::Set(linear_id.to_string()),
+        identifier: ActiveValue::Set(identifier.to_string()),
+        title: ActiveValue::Set(title.to_string()),
+        description: ActiveValue::Set(None),
+        url: ActiveValue::Set(format!("https://linear.app/test/issue/{identifier}")),
+        state_name: ActiveValue::Set("Todo".to_string()),
+        state_type: ActiveValue::Set("active".to_string()),
+        priority: ActiveValue::Set(None),
+        team_key: ActiveValue::Set(Some("ENG".to_string())),
+        assignee_name: ActiveValue::Set(None),
+        assigned_to_me: ActiveValue::Set(false),
+        remote_created_at: ActiveValue::Set(None),
+        remote_updated_at: ActiveValue::Set(None),
+        synced_at: ActiveValue::Set(now),
+        dismissed_at: ActiveValue::Set(None),
+    };
+    issue.insert(db).await.unwrap().id
+}
