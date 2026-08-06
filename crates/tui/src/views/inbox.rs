@@ -201,14 +201,12 @@ pub(crate) async fn handle_navigate(
 ) -> anyhow::Result<bool> {
     let total = app.inbox_prs().len() + app.inbox_linears().len();
     match key {
-        KeyCode::Char('j') | KeyCode::Down
-            if app.cursor + 1 < total => {
-                app.cursor += 1;
-            }
-        KeyCode::Char('k') | KeyCode::Up
-            if app.cursor > 0 => {
-                app.cursor -= 1;
-            }
+        KeyCode::Char('j') | KeyCode::Down if app.cursor + 1 < total => {
+            app.cursor += 1;
+        }
+        KeyCode::Char('k') | KeyCode::Up if app.cursor > 0 => {
+            app.cursor -= 1;
+        }
         KeyCode::Char('C') => {
             // Convert selected inbox row to todo, plan today.
             let prs = app.inbox_prs();

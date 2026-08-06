@@ -226,7 +226,11 @@ impl App {
             if let Some(ttl) = &mut t.ttl {
                 // Decrement by the tick interval (≈100ms).
                 if let Some(remaining) = ttl.checked_sub(std::time::Duration::from_millis(100)) {
-                    *ttl = remaining;
+                    if remaining.is_zero() {
+                        self.toast = None;
+                    } else {
+                        *ttl = remaining;
+                    }
                 } else {
                     self.toast = None;
                 }

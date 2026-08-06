@@ -105,10 +105,9 @@ pub(crate) async fn handle_navigate(
         KeyCode::Char('j') | KeyCode::Down => {
             app.cursor = app.cursor.saturating_add(1);
         }
-        KeyCode::Char('k') | KeyCode::Up
-            if app.cursor > 0 => {
-                app.cursor -= 1;
-            }
+        KeyCode::Char('k') | KeyCode::Up if app.cursor > 0 => {
+            app.cursor -= 1;
+        }
         KeyCode::Char('/') => {
             app.mode = crate::app::Mode::Search {
                 input: String::new(),
