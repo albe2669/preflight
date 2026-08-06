@@ -4,7 +4,6 @@
 //! handlers are async (they issue GraphQL mutations then trigger a refetch).
 
 pub mod backlog;
-pub mod detail;
 pub mod inbox;
 pub mod review;
 pub mod sync;
@@ -13,7 +12,7 @@ pub mod today;
 use ratatui::Frame;
 use tokio::sync::mpsc;
 
-use crate::app::{App, ConfirmAction, Mode, ToastKind, View};
+use crate::app::{App, ConfirmAction, LinkKind, Mode, SidebarField, ToastKind, View};
 use crate::frame;
 use crate::gql;
 use crate::theme::{Glyph, Palette};
@@ -22,7 +21,7 @@ use crate::theme::{Glyph, Palette};
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
     let content = frame::render_frame(f, app, area);
-
+    app.content_width = content.width;
     let (list_area, sidebar_area) = frame::split_content(content);
     match app.view {
         View::Today => today::render(f, app, list_area),
@@ -37,10 +36,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
     }
 
-    // Overlays: detail pane and confirm dialog and toast.
-    if let Mode::Detail { .. } = &app.mode {
-        detail::render_overlay(f, app, area);
-    }
+    // Overlays: confirm dialog, status select, help, toast.
     if let Mode::Help { .. } = &app.mode {
         render_help(f, app, area);
     }
@@ -123,12 +119,12 @@ const TODAY_KEYS: &[KeybindRow] = &[
         desc: "add todo (inline)",
     },
     KeybindRow {
-        key: "e",
+        key: "r",
         desc: "edit title (inline)",
     },
     KeybindRow {
-        key: "Enter",
-        desc: "open detail",
+        key: "e/Enter",
+        desc: "sidebar edit",
     },
     KeybindRow {
         key: "D",
@@ -186,8 +182,12 @@ const BACKLOG_KEYS: &[KeybindRow] = &[
         desc: "add todo (inline)",
     },
     KeybindRow {
-        key: "Enter",
-        desc: "open detail",
+        key: "r",
+        desc: "edit title (inline)",
+    },
+    KeybindRow {
+        key: "e/Enter",
+        desc: "sidebar edit",
     },
 ];
 
@@ -688,14 +688,336 @@ pub(crate) async fn handle_confirm(
     Ok(false)
 }
 
-pub(crate) async fn handle_detail(
+/// Fetch detail data (events) for a todo and cache it.
+pub(crate) fn fetch_detail(
+    app: &mut App,
+    client: &gql::Client,
+    tx: &mpsc::Sender<crate::AppMsg>,
+    id: i32,
+) {
+    app.detail_loaded_id = Some(id);
+    app.detail = None;
+    let c = client.clone();
+    let t = tx.clone();
+    tokio::spawn(async move {
+        match c.todo_events(id).await {
+            Ok(events) => {
+                let _ = t.send(crate::AppMsg::DetailData(id, events)).await;
+            }
+            Err(e) => {
+                let _ = t
+                    .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
+                    .await;
+            }
+        }
+    });
+}
+
+/// Handle sidebar edit mode keys.
+pub(crate) async fn handle_sidebar_edit(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
     tx: &mpsc::Sender<crate::AppMsg>,
-    id: i32,
 ) -> anyhow::Result<bool> {
-    detail::handle(app, key, client, tx, id).await
+    use ratatui::crossterm::event::KeyCode::*;
+
+    let (
+        id,
+        field,
+        input_active,
+        desc_input,
+        _desc_scroll,
+        tag_input,
+        link_kind,
+        link_selection,
+        _scroll,
+    ) = match &app.mode {
+        Mode::SidebarEdit {
+            id,
+            field,
+            input_active,
+            desc_input,
+            desc_scroll,
+            tag_input,
+            link_kind,
+            link_selection,
+            scroll,
+        } => (
+            *id,
+            *field,
+            *input_active,
+            desc_input.clone(),
+            *desc_scroll,
+            tag_input.clone(),
+            *link_kind,
+            *link_selection,
+            *scroll,
+        ),
+        _ => return Ok(false),
+    };
+
+    // Fetch linked items for this todo if not already loaded
+    let all_links = {
+        let c = client.clone();
+        let prs = c.todo_pull_requests(id).await.ok().unwrap_or_default();
+        let linears = c.todo_linear_issues(id).await.ok().unwrap_or_default();
+        (prs, linears)
+    };
+
+    if !input_active {
+        // Field navigation mode
+        match key {
+            Char('\t') | Char('j') => {
+                let next_field = match field {
+                    SidebarField::Description => SidebarField::Links,
+                    SidebarField::Links => SidebarField::Tags,
+                    SidebarField::Tags => SidebarField::Description,
+                };
+                if let Mode::SidebarEdit { field, scroll, .. } = &mut app.mode {
+                    *field = next_field;
+                    *scroll = 0;
+                }
+            }
+            BackTab => {
+                let prev_field = match field {
+                    SidebarField::Description => SidebarField::Tags,
+                    SidebarField::Links => SidebarField::Description,
+                    SidebarField::Tags => SidebarField::Links,
+                };
+                if let Mode::SidebarEdit { field, scroll, .. } = &mut app.mode {
+                    *field = prev_field;
+                    *scroll = 0;
+                }
+            }
+            Char('k') => {
+                let prev_field = match field {
+                    SidebarField::Description => SidebarField::Tags,
+                    SidebarField::Links => SidebarField::Description,
+                    SidebarField::Tags => SidebarField::Links,
+                };
+                if let Mode::SidebarEdit { field, scroll, .. } = &mut app.mode {
+                    *field = prev_field;
+                    *scroll = 0;
+                }
+            }
+            Enter => {
+                if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                    *input_active = true;
+                }
+            }
+            Esc => {
+                app.mode = Mode::Navigate;
+                app.toast = None;
+            }
+            _ => {}
+        }
+    } else {
+        // Input active mode — field-specific editing
+        match field {
+            SidebarField::Description => {
+                match key {
+                    Char(c)
+                        if c.is_alphanumeric()
+                            || c == ' '
+                            || c == '#'
+                            || c == '-'
+                            || c == '_'
+                            || c == '.'
+                            || c == ','
+                            || c == '!'
+                            || c == '?'
+                            || c == '('
+                            || c == ')'
+                            || c == '['
+                            || c == ']' =>
+                    {
+                        if let Mode::SidebarEdit { desc_input, .. } = &mut app.mode {
+                            desc_input.push(c);
+                        }
+                    }
+                    Char('\n') => {
+                        // Commit description
+                        let desc = desc_input.clone();
+                        let c = client.clone();
+                        let t = tx.clone();
+                        tokio::spawn(async move {
+                            if c.update_todo(id, None, Some(&desc)).await.is_ok() {
+                                let _ = t
+                                    .send(crate::AppMsg::Toast(
+                                        ToastKind::Success,
+                                        "description saved".into(),
+                                    ))
+                                    .await;
+                                let _ = t.send(crate::AppMsg::Refresh).await;
+                            }
+                        });
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    Backspace => {
+                        if let Mode::SidebarEdit { desc_input, .. } = &mut app.mode {
+                            desc_input.pop();
+                        }
+                    }
+                    Down => {
+                        if let Mode::SidebarEdit { desc_scroll, .. } = &mut app.mode {
+                            *desc_scroll = desc_scroll.saturating_add(1);
+                        }
+                    }
+                    Up => {
+                        if let Mode::SidebarEdit { desc_scroll, .. } = &mut app.mode {
+                            *desc_scroll = desc_scroll.saturating_sub(1);
+                        }
+                    }
+                    Esc => {
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            SidebarField::Links => {
+                match key {
+                    Char('\t') => {
+                        if let Mode::SidebarEdit {
+                            link_kind,
+                            link_selection,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *link_kind = match link_kind {
+                                LinkKind::Pr => LinkKind::Linear,
+                                LinkKind::Linear => LinkKind::Pr,
+                            };
+                            *link_selection = 0;
+                        }
+                    }
+                    Char('j') | Down => {
+                        let max_sel = if link_kind == LinkKind::Pr {
+                            all_links.0.len().saturating_sub(1)
+                        } else {
+                            all_links.1.len().saturating_sub(1)
+                        };
+                        if let Mode::SidebarEdit { link_selection, .. } = &mut app.mode {
+                            if *link_selection < max_sel {
+                                *link_selection += 1;
+                            }
+                        }
+                    }
+                    Char('k') | Up => {
+                        if let Mode::SidebarEdit { link_selection, .. } = &mut app.mode {
+                            *link_selection = link_selection.saturating_sub(1);
+                        }
+                    }
+                    Enter => {
+                        // Attach the selected link (already linked items are shown;
+                        // this is mainly for the UI flow — Enter on a link just navigates)
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    Char('x') => {
+                        // Detach the selected link
+                        let c = client.clone();
+                        let t = tx.clone();
+                        if link_kind == LinkKind::Pr {
+                            if let Some(link) = all_links.0.get(link_selection) {
+                                let pr_id = link.pull_request_id;
+                                tokio::spawn(async move {
+                                    if c.unlink_pull_request(id, pr_id).await.is_ok() {
+                                        let _ = t
+                                            .send(crate::AppMsg::Toast(
+                                                ToastKind::Success,
+                                                "pr detached".into(),
+                                            ))
+                                            .await;
+                                        let _ = t.send(crate::AppMsg::Refresh).await;
+                                    }
+                                });
+                            }
+                        } else {
+                            if let Some(link) = all_links.1.get(link_selection) {
+                                let issue_id = link.linear_issue_id;
+                                tokio::spawn(async move {
+                                    if c.unlink_linear_issue(id, issue_id).await.is_ok() {
+                                        let _ = t
+                                            .send(crate::AppMsg::Toast(
+                                                ToastKind::Success,
+                                                "issue detached".into(),
+                                            ))
+                                            .await;
+                                        let _ = t.send(crate::AppMsg::Refresh).await;
+                                    }
+                                });
+                            }
+                        }
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    Esc => {
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            SidebarField::Tags => {
+                match key {
+                    Char(c) if c.is_alphanumeric() || c == '-' || c == '_' => {
+                        if let Mode::SidebarEdit { tag_input, .. } = &mut app.mode {
+                            tag_input.push(c);
+                        }
+                    }
+                    Backspace => {
+                        if let Mode::SidebarEdit { tag_input, .. } = &mut app.mode {
+                            tag_input.pop();
+                        }
+                    }
+                    Enter => {
+                        let slug = tag_input.trim().to_string();
+                        if !slug.is_empty() {
+                            let c = client.clone();
+                            let t = tx.clone();
+                            let slug2 = slug.clone();
+                            tokio::spawn(async move {
+                                // Check if tag already exists on the todo by looking at app.detail
+                                if c.add_tag(id, &slug2).await.is_ok() {
+                                    let _ = t
+                                        .send(crate::AppMsg::Toast(
+                                            ToastKind::Success,
+                                            "tag added".into(),
+                                        ))
+                                        .await;
+                                    let _ = t.send(crate::AppMsg::Refresh).await;
+                                }
+                            });
+                        }
+                        if let Mode::SidebarEdit {
+                            tag_input,
+                            input_active,
+                            ..
+                        } = &mut app.mode
+                        {
+                            tag_input.clear();
+                            *input_active = false;
+                        }
+                    }
+                    Esc => {
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(false)
 }
 
 // ---- Status-selection popup ----

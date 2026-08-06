@@ -164,6 +164,10 @@ async fn handle_key(
             return Ok(false);
         }
         Esc => {
+            if let Mode::SidebarEdit { .. } = app.mode {
+                // Let the handler own the two-Esc logic
+                return Ok(false);
+            }
             app.mode = Mode::Navigate;
             app.toast = None;
             return Ok(false);
@@ -184,13 +188,13 @@ async fn handle_key(
         Mode::Search { input } => views::handle_search(app, key, &input),
         Mode::Reorder { source_id } => views::handle_reorder(app, key, client, tx, source_id).await,
         Mode::Confirm { action } => views::handle_confirm(app, key, client, tx, &action).await,
-        Mode::Detail { id } => views::handle_detail(app, key, client, tx, id).await,
         Mode::Help { filter } => views::handle_help(app, key, &filter),
         Mode::StatusSelect {
             id,
             selection,
             reason,
         } => views::handle_status_select(app, key, client, tx, id, selection, reason).await,
+        Mode::SidebarEdit { .. } => views::handle_sidebar_edit(app, key, client, tx).await,
     }
 }
 

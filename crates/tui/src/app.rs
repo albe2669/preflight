@@ -64,9 +64,6 @@ pub enum Mode {
     Confirm {
         action: ConfirmAction,
     },
-    Detail {
-        id: i32,
-    },
     Help {
         filter: String,
     },
@@ -75,6 +72,32 @@ pub enum Mode {
         selection: usize,
         reason: Option<String>,
     },
+    SidebarEdit {
+        id: i32,
+        field: SidebarField,
+        input_active: bool,
+        desc_input: String,
+        desc_scroll: usize,
+        tag_input: String,
+        link_kind: LinkKind,
+        link_selection: usize,
+        scroll: usize,
+    },
+}
+
+/// Which field is focused in the sidebar edit form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SidebarField {
+    Description,
+    Links,
+    Tags,
+}
+
+/// Which type of link the sidebar edit form is currently browsing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkKind {
+    Pr,
+    Linear,
 }
 
 /// Destructive actions that require confirmation per the design.
@@ -142,6 +165,8 @@ pub struct App {
     pub show_done: bool,
     pub detail: Option<DetailData>,
     pub help_scroll: usize,
+    pub detail_loaded_id: Option<i32>,
+    pub content_width: u16,
 }
 
 /// Lazy-loaded data for the detail overlay.
@@ -169,6 +194,8 @@ impl Default for App {
             show_done: false,
             detail: None,
             help_scroll: 0,
+            detail_loaded_id: None,
+            content_width: 0,
         }
     }
 }

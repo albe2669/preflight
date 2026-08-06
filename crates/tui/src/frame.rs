@@ -565,9 +565,17 @@ fn grouped_todo_line(todo: &Todo, is_cursor: bool, carried: bool) -> Line<'_> {
     Line::from(spans)
 }
 
-/// Render the info sidebar for the highlighted todo (D4). Reads the todo
-/// from the cursor position; shows status, tags, timestamps, blocked reason.
+/// Render the info sidebar for the highlighted todo (D4).
+/// In sidebar edit mode, renders the edit form.
+/// Otherwise, renders the read-only info card.
 pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
+    // Check if we are in sidebar edit mode
+    if let crate::app::Mode::SidebarEdit { .. } = app.mode {
+        render_sidebar_edit_form(f, app, area);
+        return;
+    }
+
+    // Read-only info card
     let todo = sidebar_todo(app);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -664,7 +672,246 @@ pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
         }
     }
 
+    // LINKS region from app.detail
+    if let crate::app::Mode::SidebarEdit { id: _, .. } = app.mode {
+        // Edit mode — handled above, but keep LINKS for read mode below
+    } else {
+        // Read mode: show LINKS if detail is loaded
+        let loaded = app.detail_loaded_id;
+        let detail = app.detail.as_ref();
+        if loaded.is_some() && todo.id == loaded.unwrap() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "LINKS",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            if let Some(d) = detail {
+                let events = d.events.as_slice();
+                if events.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "  No linked PRs or issues",
+                        Style::default().fg(Palette::GHOST),
+                    )));
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "  loading…",
+                    Style::default().fg(Palette::GHOST),
+                )));
+            }
+        }
+    }
+
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the sidebar edit form when in SidebarEdit mode.
+fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
+    let crate::app::Mode::SidebarEdit {
+        id,
+        field,
+        input_active,
+        desc_input,
+        tag_input,
+        link_kind,
+        link_selection,
+        scroll,
+        ..
+    } = &app.mode
+    else {
+        return;
+    };
+
+    let id = *id;
+    let field = *field;
+    let input_active = *input_active;
+    let link_kind = *link_kind;
+    let link_selection = *link_selection;
+    let scroll = *scroll;
+    let desc_input: &str = desc_input;
+    let tag_input: &str = tag_input;
+
+    let todo = app.data.todos.iter().find(|t| t.id == id);
+    let Some(todo) = todo else {
+        let line = Line::from(Span::styled(
+            "todo not found",
+            Style::default().fg(Palette::GHOST),
+        ));
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::ACCENT))
+        .title(Span::styled(" EDIT ", Style::default().fg(Palette::ACCENT)));
+    f.render_widget(block, area);
+
+    let inner = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    );
+    if inner.height == 0 {
+        return;
+    }
+
+    let (glyph, color) = status_glyph(&todo.status);
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Title (read-only)
+    lines.push(Line::from(vec![
+        Span::styled(glyph.to_string(), Style::default().fg(color)),
+        Span::raw(" "),
+        Span::styled(todo.title.clone(), Style::default().fg(Palette::TEXT)),
+    ]));
+    lines.push(Line::from(Span::styled(
+        "r to edit title",
+        Style::default().fg(Palette::GHOST),
+    )));
+    lines.push(Line::from(""));
+
+    // DESCRIPTION
+    let desc_header = if field == crate::app::SidebarField::Description {
+        if input_active {
+            Span::styled(
+                "▸ DESCRIPTION",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                "  DESCRIPTION",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        }
+    } else {
+        Span::styled("  DESCRIPTION", Style::default().fg(Palette::DIM))
+    };
+    lines.push(Line::from(desc_header));
+    if input_active && field == crate::app::SidebarField::Description {
+        lines.push(Line::from(Span::styled(
+            desc_input,
+            Style::default().fg(Palette::TEXT),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            if desc_input.is_empty() {
+                "—"
+            } else {
+                desc_input
+            },
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    // LINKS
+    let links_header = if field == crate::app::SidebarField::Links {
+        if input_active {
+            Span::styled(
+                "▸ LINKS",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                "  LINKS",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        }
+    } else {
+        Span::styled("  LINKS", Style::default().fg(Palette::DIM))
+    };
+    lines.push(Line::from(links_header));
+    let detail = app.detail.as_ref();
+    let events = detail.map(|d| d.events.as_slice()).unwrap_or(&[]);
+    if events.is_empty() && !input_active {
+        lines.push(Line::from(Span::styled(
+            "  No linked PRs or issues",
+            Style::default().fg(Palette::GHOST),
+        )));
+    }
+    if input_active && field == crate::app::SidebarField::Links {
+        let kind_str = match link_kind {
+            crate::app::LinkKind::Pr => "PRs",
+            crate::app::LinkKind::Linear => "Issues",
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  [{kind_str}] selection: {link_selection}",),
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    // TAGS
+    let tags_header = if field == crate::app::SidebarField::Tags {
+        if input_active {
+            Span::styled(
+                "▸ TAGS",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                "  TAGS",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        }
+    } else {
+        Span::styled("  TAGS", Style::default().fg(Palette::DIM))
+    };
+    lines.push(Line::from(tags_header));
+    let tag_strs: Vec<String> = todo
+        .tag
+        .nodes
+        .iter()
+        .map(|t| format!("#{}", t.slug))
+        .collect();
+    if input_active && field == crate::app::SidebarField::Tags {
+        lines.push(Line::from(Span::styled(
+            format!("{} {}▌", tag_strs.join(" "), tag_input),
+            Style::default().fg(Palette::TEXT),
+        )));
+    } else if tag_strs.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  none",
+            Style::default().fg(Palette::GHOST),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", tag_strs.join(" ")),
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+
+    // Footer hints
+    lines.push(Line::from(""));
+    if input_active {
+        lines.push(Line::from(Span::styled(
+            "Enter: save · Esc: cancel",
+            Style::default().fg(Palette::GHOST),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Tab/j: next · k: prev · Enter: edit · Esc: done",
+            Style::default().fg(Palette::GHOST),
+        )));
+    }
+
+    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
 }
 
 /// Resolve the highlighted todo for the sidebar: the cursor todo from the

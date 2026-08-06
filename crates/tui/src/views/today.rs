@@ -14,7 +14,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use tokio::sync::mpsc;
 
-use crate::app::{App, ConfirmAction, Mode, ToastKind, View, matches_filter};
+use crate::app::{
+    App, ConfirmAction, LinkKind, Mode, SidebarField, ToastKind, View, matches_filter,
+};
 use crate::frame;
 use crate::gql;
 use crate::theme::Palette;
@@ -135,7 +137,7 @@ pub(crate) async fn handle_navigate(
                 input: String::new(),
             };
         }
-        KeyCode::Char('e') => {
+        KeyCode::Char('r') => {
             if let Some(td) = app.today_plan().get(app.cursor) {
                 app.mode = Mode::InlineEdit {
                     id: td.id,
@@ -143,12 +145,22 @@ pub(crate) async fn handle_navigate(
                 };
             }
         }
-        KeyCode::Enter => {
+        KeyCode::Enter | KeyCode::Char('e') => {
             if let Some(td) = app.today_plan().get(app.cursor) {
                 let id = td.id;
-                app.mode = Mode::Detail { id };
-                app.detail = None;
-                fetch_detail(app, client, tx, id);
+                let desc = td.description.clone().unwrap_or_default();
+                app.mode = Mode::SidebarEdit {
+                    id,
+                    field: SidebarField::Description,
+                    input_active: false,
+                    desc_input: desc,
+                    desc_scroll: 0,
+                    tag_input: String::new(),
+                    link_kind: LinkKind::Pr,
+                    link_selection: 0,
+                    scroll: 0,
+                };
+                super::fetch_detail(app, client, tx, id);
             }
         }
         KeyCode::Char('D') => {
@@ -225,22 +237,6 @@ async fn fetch_review(app: &mut App, client: &gql::Client, tx: &mpsc::Sender<cra
     });
 }
 
-fn fetch_detail(_app: &mut App, client: &gql::Client, tx: &mpsc::Sender<crate::AppMsg>, id: i32) {
-    let c = client.clone();
-    let t = tx.clone();
-    tokio::spawn(async move {
-        match c.todo_events(id).await {
-            Ok(events) => {
-                let _ = t.send(crate::AppMsg::DetailData(id, events)).await;
-            }
-            Err(e) => {
-                let _ = t
-                    .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
-                    .await;
-            }
-        }
-    });
-}
 #[cfg(test)]
 mod render_tests {
     use ratatui::{Terminal, backend::TestBackend};
