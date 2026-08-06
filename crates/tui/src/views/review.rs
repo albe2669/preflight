@@ -148,3 +148,79 @@ async fn fetch_review(app: &mut App, client: &gql::Client, tx: &mpsc::Sender<cra
         }
     });
 }
+
+#[cfg(test)]
+mod render_tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use crate::app::App;
+    use crate::app::tests::make_todo;
+    use crate::gql::DailyReview;
+    use crate::test_support::buffer_text;
+
+    fn render_review(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                crate::views::review::render(f, app, area);
+            })
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_review_renders_planned_and_touched_headers() {
+        let mut app = App {
+            review: Some(DailyReview {
+                date: "2026-08-05".to_string(),
+                planned: vec![make_todo(1, "Planned task", "todo")],
+                touched: vec![make_todo(2, "Touched task", "started")],
+                completed: vec![],
+                carried_over: vec![],
+            }),
+            ..Default::default()
+        };
+
+        let buf = render_review(&mut app);
+
+        assert!(
+            buf.contains("PLANNED · 1"),
+            "expected PLANNED header with count, got:\n{buf}"
+        );
+        assert!(
+            buf.contains("TOUCHED · 1"),
+            "expected TOUCHED header with count, got:\n{buf}"
+        );
+        assert!(
+            buf.contains("Planned task"),
+            "expected planned todo title, got:\n{buf}"
+        );
+        assert!(
+            buf.contains("Touched task"),
+            "expected touched todo title, got:\n{buf}"
+        );
+    }
+
+    #[test]
+    fn test_review_renders_loading_state_when_no_review() {
+        let mut app = App {
+            review: None,
+            review_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 5).unwrap(),
+            ..Default::default()
+        };
+
+        let buf = render_review(&mut app);
+
+        assert!(
+            buf.contains("loading review"),
+            "expected loading indicator, got:\n{buf}"
+        );
+        assert!(
+            buf.contains("2026-08-05"),
+            "expected review date in loading message, got:\n{buf}"
+        );
+    }
+}
