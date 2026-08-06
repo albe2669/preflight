@@ -262,3 +262,527 @@ pub fn short_clock(ts: &str) -> String {
     let Ok(t) = parsed else { return String::new() };
     t.format("%H:%M").to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use chrono::DateTime;
+
+    use super::*;
+
+    // -- fixture helpers --
+
+    fn make_todo(id: i32, title: &str, status: &str) -> crate::gql::Todo {
+        crate::gql::Todo {
+            id,
+            title: title.to_string(),
+            description: None,
+            status: status.to_string(),
+            blocked_reason: None,
+            sort_key: id,
+            created_at: "2026-08-05 10:00:00 +00:00".to_string(),
+            started_at: None,
+            closed_at: None,
+        }
+    }
+
+    fn make_plan_row(
+        id: i32,
+        position: i32,
+        todo: crate::gql::Todo,
+        removed_at: Option<&str>,
+    ) -> crate::gql::PlanRow {
+        crate::gql::PlanRow {
+            id,
+            position,
+            carried_over: false,
+            removed_at: removed_at.map(|s| s.to_string()),
+            todo: Some(todo),
+        }
+    }
+
+    fn make_plan_row_no_todo(
+        id: i32,
+        position: i32,
+        removed_at: Option<&str>,
+    ) -> crate::gql::PlanRow {
+        crate::gql::PlanRow {
+            id,
+            position,
+            carried_over: false,
+            removed_at: removed_at.map(|s| s.to_string()),
+            todo: None,
+        }
+    }
+
+    fn make_pr(id: i32, dismissed_at: Option<&str>) -> crate::gql::PullRequest {
+        crate::gql::PullRequest {
+            id,
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            number: id,
+            title: format!("PR #{id}"),
+            url: "https://example.com".to_string(),
+            author: None,
+            state: "open".to_string(),
+            review_requested: false,
+            authored_by_me: false,
+            dismissed_at: dismissed_at.map(|s| s.to_string()),
+        }
+    }
+
+    fn make_linear(id: i32, dismissed_at: Option<&str>) -> crate::gql::LinearIssue {
+        crate::gql::LinearIssue {
+            id,
+            identifier: format!("PROJ-{id}"),
+            title: format!("Issue #{id}"),
+            url: "https://example.com".to_string(),
+            state_name: "Todo".to_string(),
+            state_type: "triage".to_string(),
+            priority: None,
+            team_key: None,
+            assignee_name: None,
+            assigned_to_me: false,
+            dismissed_at: dismissed_at.map(|s| s.to_string()),
+        }
+    }
+
+    fn make_sync(source: &str) -> crate::gql::SyncState {
+        crate::gql::SyncState {
+            source: source.to_string(),
+            cursor: None,
+            last_synced_at: None,
+            last_status: "ok".to_string(),
+            last_error: None,
+        }
+    }
+
+    fn now_utc() -> chrono::DateTime<chrono::Utc> {
+        DateTime::parse_from_str("2026-08-05 14:31:00 +00:00", "%Y-%m-%d %H:%M:%S %z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    // -- View tests --
+
+    #[test]
+    fn test_view_label_returns_correct_strings() {
+        assert_eq!(View::Today.label(), "Today");
+        assert_eq!(View::Backlog.label(), "Backlog");
+        assert_eq!(View::Inbox.label(), "Inbox");
+        assert_eq!(View::Review.label(), "Review");
+        assert_eq!(View::Sync.label(), "Sync");
+    }
+
+    #[test]
+    fn test_view_all_has_five_elements_in_order() {
+        assert_eq!(View::ALL.len(), 5);
+        assert_eq!(View::ALL[0], View::Today);
+        assert_eq!(View::ALL[1], View::Backlog);
+        assert_eq!(View::ALL[2], View::Inbox);
+        assert_eq!(View::ALL[3], View::Review);
+        assert_eq!(View::ALL[4], View::Sync);
+    }
+
+    // -- relative_time tests --
+
+    #[test]
+    fn test_relative_time_just_now() {
+        let now = now_utc();
+        // 30 seconds ago
+        let ts = "2026-08-05 14:30:30 +00:00";
+        assert_eq!(relative_time(ts, now), "just now");
+    }
+
+    #[test]
+    fn test_relative_time_minutes_ago() {
+        let now = now_utc();
+        let ts = "2026-08-05 14:28:00 +00:00"; // 3m ago
+        assert_eq!(relative_time(ts, now), "3m ago");
+    }
+
+    #[test]
+    fn test_relative_time_hours_ago() {
+        let now = now_utc();
+        let ts = "2026-08-05 12:31:00 +00:00"; // 2h ago
+        assert_eq!(relative_time(ts, now), "2h ago");
+    }
+
+    #[test]
+    fn test_relative_time_days_ago() {
+        let now = now_utc();
+        let ts = "2026-08-01 14:31:00 +00:00"; // 4 days ago
+        assert_eq!(relative_time(ts, now), "4d ago");
+    }
+
+    #[test]
+    fn test_relative_time_unparseable_returns_empty() {
+        let now = now_utc();
+        assert_eq!(relative_time("not a date", now), "");
+        assert_eq!(relative_time("", now), "");
+    }
+
+    // -- short_clock tests --
+
+    #[test]
+    fn test_short_clock_valid() {
+        let ts = "2026-08-05 14:31:00 +00:00";
+        assert_eq!(short_clock(ts), "14:31");
+    }
+
+    #[test]
+    fn test_short_clock_unparseable_returns_empty() {
+        assert_eq!(short_clock("bad"), "");
+        assert_eq!(short_clock(""), "");
+    }
+
+    #[test]
+    fn test_short_clock_midnight() {
+        let ts = "2026-08-05 00:00:00 +00:00";
+        assert_eq!(short_clock(ts), "00:00");
+    }
+
+    #[test]
+    fn test_short_clock_23_59() {
+        let ts = "2026-08-05 23:59:00 +00:00";
+        assert_eq!(short_clock(ts), "23:59");
+    }
+
+    // -- AppData::from_fetch_all --
+
+    #[test]
+    fn test_app_data_from_fetch_all() {
+        use crate::gql::FetchAll;
+        let todo = make_todo(1, "T1", "todo");
+        let pr = make_pr(1, None);
+        let sync = make_sync("github");
+        let fetch = FetchAll {
+            todo: vec![todo.clone()],
+            plan: vec![],
+            pulls: vec![pr.clone()],
+            linears: vec![],
+            sync: vec![sync.clone()],
+        };
+        let data = AppData::from_fetch_all(fetch);
+        assert_eq!(data.todos.len(), 1);
+        assert_eq!(data.todos[0].id, 1);
+        assert_eq!(data.pulls.len(), 1);
+        assert_eq!(data.sync.len(), 1);
+        assert_eq!(data.sync[0].source, "github");
+    }
+
+    // -- today_plan tests --
+
+    #[test]
+    fn test_today_plan_filters_removed_and_no_todo() {
+        let mut app = App::default();
+        let active_todo = make_todo(1, "Active", "todo");
+        let removed_todo = make_todo(2, "Removed", "todo");
+        let orphan_row = make_plan_row_no_todo(3, 1, None); // no todo
+
+        app.data.plan = vec![
+            make_plan_row(1, 1, active_todo, None), // active
+            make_plan_row(2, 2, removed_todo, Some("2026-08-05")), // removed
+            orphan_row,                             // no todo
+        ];
+
+        let plan = app.today_plan();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].id, 1);
+    }
+
+    #[test]
+    fn test_today_plan_order_by_position() {
+        let mut app = App::default();
+        app.data.plan = vec![
+            make_plan_row(2, 2, make_todo(2, "B", "todo"), None),
+            make_plan_row(1, 1, make_todo(1, "A", "todo"), None),
+        ];
+
+        let plan = app.today_plan();
+        assert_eq!(plan.len(), 2);
+        // Plan rows are iterated in vec order, so position doesn't reorder — the
+        // vec order is the position order
+        assert_eq!(plan[0].id, 2);
+        assert_eq!(plan[1].id, 1);
+    }
+
+    // -- today_unplanned tests --
+
+    #[test]
+    fn test_today_unplanned_only_removed() {
+        let mut app = App::default();
+        app.data.plan = vec![
+            make_plan_row(1, 1, make_todo(1, "A", "todo"), None),
+            make_plan_row(2, 2, make_todo(2, "B", "todo"), Some("2026-08-05")),
+        ];
+
+        let unplanned = app.today_unplanned();
+        assert_eq!(unplanned.len(), 1);
+        assert_eq!(unplanned[0].id, 2);
+    }
+
+    // -- backlog tests --
+
+    #[test]
+    fn test_backlog_excludes_planned_todos() {
+        let mut app = App::default();
+        let planned = make_todo(1, "Planned", "todo");
+        let unplanned = make_todo(2, "Backlog item", "todo");
+
+        app.data.todos = vec![planned.clone(), unplanned.clone()];
+        app.data.plan = vec![make_plan_row(1, 1, planned, None)];
+
+        let backlog = app.backlog();
+        assert_eq!(backlog.len(), 1);
+        assert_eq!(backlog[0].id, 2);
+    }
+
+    #[test]
+    fn test_backlog_includes_removed_plan_todos() {
+        let mut app = App::default();
+        let todo = make_todo(1, "Was planned", "todo");
+        app.data.todos = vec![todo.clone()];
+        // removed_at set => not on active plan => should appear in backlog
+        app.data.plan = vec![make_plan_row(1, 1, todo.clone(), Some("2026-08-05"))];
+
+        let backlog = app.backlog();
+        assert_eq!(backlog.len(), 1);
+        assert_eq!(backlog[0].id, 1);
+    }
+
+    // -- inbox_prs tests --
+
+    #[test]
+    fn test_inbox_prs_filters_dismissed() {
+        let mut app = App::default();
+        app.data.pulls = vec![make_pr(1, None), make_pr(2, Some("2026-08-05"))];
+        app.show_dismissed = false;
+
+        let prs = app.inbox_prs();
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].id, 1);
+    }
+
+    #[test]
+    fn test_inbox_prs_shows_dismissed_when_flagged() {
+        let mut app = App::default();
+        app.data.pulls = vec![make_pr(1, None), make_pr(2, Some("2026-08-05"))];
+        app.show_dismissed = true;
+
+        let prs = app.inbox_prs();
+        assert_eq!(prs.len(), 2);
+    }
+
+    // -- inbox_linears tests --
+
+    #[test]
+    fn test_inbox_linears_filters_dismissed() {
+        let mut app = App::default();
+        app.data.linears = vec![make_linear(1, None), make_linear(2, Some("2026-08-05"))];
+        app.show_dismissed = false;
+
+        let linears = app.inbox_linears();
+        assert_eq!(linears.len(), 1);
+        assert_eq!(linears[0].id, 1);
+    }
+
+    #[test]
+    fn test_inbox_linears_shows_dismissed_when_flagged() {
+        let mut app = App::default();
+        app.data.linears = vec![make_linear(1, None), make_linear(2, Some("2026-08-05"))];
+        app.show_dismissed = true;
+
+        let linears = app.inbox_linears();
+        assert_eq!(linears.len(), 2);
+    }
+
+    // -- sync_by_source tests --
+
+    #[test]
+    fn test_sync_by_source_finds_existing() {
+        let mut app = App::default();
+        app.data.sync = vec![make_sync("github"), make_sync("linear")];
+
+        assert!(app.sync_by_source("github").is_some());
+        assert_eq!(app.sync_by_source("github").unwrap().source, "github");
+    }
+
+    #[test]
+    fn test_sync_by_source_returns_none_missing() {
+        let mut app = App::default();
+        app.data.sync = vec![make_sync("github")];
+
+        assert!(app.sync_by_source("nonexistent").is_none());
+    }
+
+    // -- set_toast / set_error tests --
+
+    #[test]
+    fn test_set_toast_success_has_ttl() {
+        let mut app = App::default();
+        app.set_toast(ToastKind::Success, "done");
+        assert!(app.toast.is_some());
+        let toast = app.toast.as_ref().unwrap();
+        assert_eq!(toast.kind, ToastKind::Success);
+        assert_eq!(toast.message, "done");
+        assert_eq!(toast.ttl, Some(Duration::from_millis(2500)));
+    }
+
+    #[test]
+    fn test_set_toast_error_is_sticky() {
+        let mut app = App::default();
+        app.set_toast(ToastKind::Error, "oops");
+        assert!(app.toast.is_some());
+        let toast = app.toast.as_ref().unwrap();
+        assert_eq!(toast.kind, ToastKind::Error);
+        assert_eq!(toast.message, "oops");
+        assert!(
+            toast.ttl.is_none(),
+            "error toast TTL should be None (sticky)"
+        );
+    }
+
+    #[test]
+    fn test_set_error_sets_error_toast() {
+        let mut app = App::default();
+        app.set_error("something broke");
+        assert!(app.toast.is_some());
+        let toast = app.toast.as_ref().unwrap();
+        assert_eq!(toast.kind, ToastKind::Error);
+        assert_eq!(toast.message, "something broke");
+        assert!(toast.ttl.is_none());
+    }
+
+    // -- tick_spinner tests --
+
+    #[test]
+    fn test_tick_spinner_increments_spinner() {
+        let mut app = App {
+            spinner: 0,
+            ..Default::default()
+        };
+        app.tick_spinner();
+        assert_eq!(app.spinner, 1);
+    }
+
+    #[test]
+    fn test_tick_spinner_wraps_at_max() {
+        let mut app = App {
+            spinner: u8::MAX,
+            ..Default::default()
+        };
+        app.tick_spinner();
+        assert_eq!(app.spinner, 0);
+    }
+
+    #[test]
+    fn test_tick_spinner_decrements_success_ttl() {
+        let mut app = App {
+            toast: Some(Toast {
+                kind: ToastKind::Success,
+                message: "ok".to_string(),
+                ttl: Some(Duration::from_millis(200)),
+            }),
+            ..Default::default()
+        };
+        app.tick_spinner();
+        let ttl = app.toast.as_ref().unwrap().ttl;
+        assert_eq!(ttl, Some(Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn test_tick_spinner_clears_toast_when_ttl_expires() {
+        let mut app = App {
+            toast: Some(Toast {
+                kind: ToastKind::Success,
+                message: "ok".to_string(),
+                ttl: Some(Duration::from_millis(50)),
+            }),
+            ..Default::default()
+        };
+        // 100ms tick > 50ms TTL => should clear
+        app.tick_spinner();
+        assert!(
+            app.toast.is_none(),
+            "toast should be cleared when TTL < tick interval"
+        );
+    }
+
+    #[test]
+    fn test_tick_spinner_does_not_clear_error_toast() {
+        let mut app = App {
+            toast: Some(Toast {
+                kind: ToastKind::Error,
+                message: "error".to_string(),
+                ttl: None,
+            }),
+            ..Default::default()
+        };
+        app.tick_spinner();
+        assert!(app.toast.is_some(), "error toast should remain (sticky)");
+    }
+
+    #[test]
+    fn test_tick_spinner_2500ms_ttl_takes_25_ticks() {
+        let mut app = App {
+            toast: Some(Toast {
+                kind: ToastKind::Success,
+                message: "ok".to_string(),
+                ttl: Some(Duration::from_millis(2500)),
+            }),
+            ..Default::default()
+        };
+        for _ in 0..25 {
+            app.tick_spinner();
+        }
+        assert!(
+            app.toast.is_none(),
+            "toast with 2500ms TTL should expire after 25 ticks of 100ms"
+        );
+    }
+
+    #[test]
+    fn test_tick_spinner_2500ms_ttl_present_after_24_ticks() {
+        let mut app = App {
+            toast: Some(Toast {
+                kind: ToastKind::Success,
+                message: "ok".to_string(),
+                ttl: Some(Duration::from_millis(2500)),
+            }),
+            ..Default::default()
+        };
+        for _ in 0..24 {
+            app.tick_spinner();
+        }
+        assert!(
+            app.toast.is_some(),
+            "toast with 2500ms TTL should still exist after 24 ticks"
+        );
+        assert_eq!(
+            app.toast.as_ref().unwrap().ttl,
+            Some(Duration::from_millis(100)),
+            "remaining TTL should be 100ms after 24 ticks"
+        );
+    }
+
+    // -- Default App state tests --
+
+    #[test]
+    fn test_default_app_state() {
+        let app = App::default();
+        assert_eq!(app.view, View::Today);
+        assert_eq!(app.mode, Mode::Navigate);
+        assert_eq!(app.cursor, 0);
+        assert_eq!(app.spinner, 0);
+        assert!(!app.show_dismissed);
+        assert!(!app.show_done);
+        assert!(app.toast.is_none());
+        assert!(app.data.todos.is_empty());
+        assert!(app.data.plan.is_empty());
+        assert!(app.data.pulls.is_empty());
+        assert!(app.data.linears.is_empty());
+        assert!(app.data.sync.is_empty());
+    }
+}

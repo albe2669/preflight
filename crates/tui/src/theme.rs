@@ -73,3 +73,104 @@ impl Glyph {
 pub const REL_REVIEWS: &str = "rev";
 pub const REL_IMPLEMENTS: &str = "impl";
 pub const REL_REFERENCES: &str = "ref";
+
+#[cfg(test)]
+mod tests {
+    use crate::theme::Glyph;
+
+    #[test]
+    fn test_spinner_has_8_elements() {
+        assert_eq!(
+            Glyph::SPINNER.len(),
+            8,
+            "SPINNER should have exactly 8 frames"
+        );
+    }
+
+    #[test]
+    fn test_spinner_frames_are_distinct() {
+        for i in 0..8 {
+            for j in (i + 1)..8 {
+                assert_ne!(
+                    Glyph::SPINNER[i],
+                    Glyph::SPINNER[j],
+                    "spinner frames {i} and {j} must be distinct characters"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_status_glyphs_are_distinct() {
+        let glyphs = [
+            Glyph::STATUS_TODO,
+            Glyph::STATUS_STARTED,
+            Glyph::STATUS_BLOCKED,
+            Glyph::STATUS_DONE,
+            Glyph::STATUS_CANCELLED,
+        ];
+        for i in 0..glyphs.len() {
+            for j in (i + 1)..glyphs.len() {
+                assert_ne!(
+                    glyphs[i], glyphs[j],
+                    "status glyphs {i} and {j} must be distinct characters"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_pr_state_glyphs_are_distinct() {
+        let glyphs = [
+            Glyph::PR_OPEN,
+            Glyph::PR_DRAFT,
+            Glyph::PR_MERGED,
+            Glyph::PR_CLOSED,
+        ];
+        for i in 0..glyphs.len() {
+            for j in (i + 1)..glyphs.len() {
+                assert_ne!(
+                    glyphs[i], glyphs[j],
+                    "PR state glyphs {i} and {j} must be distinct characters"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ui_glyphs_are_set() {
+        assert_ne!(Glyph::CURSOR, ' ');
+        assert_ne!(Glyph::MARKED, ' ');
+        assert_ne!(Glyph::REORDER_GRIP, ' ');
+        assert_ne!(Glyph::CARRIED, ' ');
+        assert_ne!(Glyph::BLOCKED_REASON, ' ');
+        assert_ne!(Glyph::DISMISSED, ' ');
+        assert_ne!(Glyph::NEEDS_YOU, ' ');
+    }
+
+    #[test]
+    fn test_bar_glyphs_are_distinct() {
+        assert_ne!(
+            Glyph::BAR_FULL,
+            Glyph::BAR_PARTIAL,
+            "bar full and partial must differ"
+        );
+        assert_ne!(
+            Glyph::BAR_PARTIAL,
+            Glyph::BAR_EMPTY,
+            "bar partial and empty must differ"
+        );
+        assert_ne!(
+            Glyph::BAR_FULL,
+            Glyph::BAR_EMPTY,
+            "bar full and empty must differ"
+        );
+    }
+
+    #[test]
+    fn test_actor_glyphs_are_set() {
+        assert_ne!(Glyph::ACTOR_USER, ' ');
+        assert_ne!(Glyph::ACTOR_SYNC, ' ');
+        assert_ne!(Glyph::ACTOR_SYSTEM, ' ');
+    }
+}

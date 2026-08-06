@@ -23,3 +23,6 @@ cynic-codegen = "3"
 
 [features]
 default = []
+
+[dev-dependencies]
+pretty_assertions = "1"

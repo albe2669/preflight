@@ -395,3 +395,190 @@ pub fn panel<'a>(title: Option<&str>, focused: bool) -> Block<'a> {
     }
     b
 }
+
+#[cfg(test)]
+mod tests {
+    use ratatui::style::Modifier;
+
+    use crate::frame::{
+        blocked_reason_line, linear_state_glyph, pr_state_glyph, section_header, status_glyph,
+    };
+    use crate::theme::{Glyph, Palette};
+
+    // -- status_glyph tests --
+
+    #[test]
+    fn test_status_glyph_todo() {
+        let (ch, color) = status_glyph("todo");
+        assert_eq!(ch, Glyph::STATUS_TODO);
+        assert_eq!(color, Palette::TODO);
+    }
+
+    #[test]
+    fn test_status_glyph_started() {
+        let (ch, color) = status_glyph("started");
+        assert_eq!(ch, Glyph::STATUS_STARTED);
+        assert_eq!(color, Palette::STARTED);
+    }
+
+    #[test]
+    fn test_status_glyph_blocked() {
+        let (ch, color) = status_glyph("blocked");
+        assert_eq!(ch, Glyph::STATUS_BLOCKED);
+        assert_eq!(color, Palette::BLOCKED);
+    }
+
+    #[test]
+    fn test_status_glyph_done() {
+        let (ch, color) = status_glyph("done");
+        assert_eq!(ch, Glyph::STATUS_DONE);
+        assert_eq!(color, Palette::DONE);
+    }
+
+    #[test]
+    fn test_status_glyph_cancelled() {
+        let (ch, color) = status_glyph("cancelled");
+        assert_eq!(ch, Glyph::STATUS_CANCELLED);
+        assert_eq!(color, Palette::CANCELLED);
+    }
+
+    #[test]
+    fn test_status_glyph_unknown() {
+        let (ch, color) = status_glyph("unknown_status");
+        assert_eq!(ch, '?');
+        assert_eq!(color, Palette::DIM);
+    }
+
+    // -- pr_state_glyph tests --
+
+    #[test]
+    fn test_pr_state_glyph_open() {
+        let (ch, color) = pr_state_glyph("open");
+        assert_eq!(ch, Glyph::PR_OPEN);
+        assert_eq!(color, Palette::DONE);
+    }
+
+    #[test]
+    fn test_pr_state_glyph_draft() {
+        let (ch, color) = pr_state_glyph("draft");
+        assert_eq!(ch, Glyph::PR_DRAFT);
+        assert_eq!(color, Palette::CANCELLED);
+    }
+
+    #[test]
+    fn test_pr_state_glyph_merged() {
+        let (ch, color) = pr_state_glyph("merged");
+        assert_eq!(ch, Glyph::PR_MERGED);
+        assert_eq!(color, Palette::MERGED);
+    }
+
+    #[test]
+    fn test_pr_state_glyph_closed() {
+        let (ch, color) = pr_state_glyph("closed");
+        assert_eq!(ch, Glyph::PR_CLOSED);
+        assert_eq!(color, Palette::BLOCKED);
+    }
+
+    #[test]
+    fn test_pr_state_glyph_unknown() {
+        let (ch, color) = pr_state_glyph("weird");
+        assert_eq!(ch, '?');
+        assert_eq!(color, Palette::DIM);
+    }
+
+    // -- linear_state_glyph tests --
+
+    #[test]
+    fn test_linear_state_glyph_triage() {
+        let (ch, color) = linear_state_glyph("triage");
+        assert_eq!(ch, '?');
+        assert_eq!(color, Palette::ACCENT);
+    }
+
+    #[test]
+    fn test_linear_state_glyph_backlog() {
+        let (ch, color) = linear_state_glyph("backlog");
+        assert_eq!(ch, '·');
+        assert_eq!(color, Palette::CANCELLED);
+    }
+
+    #[test]
+    fn test_linear_state_glyph_unstarted() {
+        let (ch, color) = linear_state_glyph("unstarted");
+        assert_eq!(ch, Glyph::STATUS_TODO);
+        assert_eq!(color, Palette::TODO);
+    }
+
+    #[test]
+    fn test_linear_state_glyph_started() {
+        let (ch, color) = linear_state_glyph("started");
+        assert_eq!(ch, Glyph::STATUS_STARTED);
+        assert_eq!(color, Palette::STARTED);
+    }
+
+    #[test]
+    fn test_linear_state_glyph_completed() {
+        let (ch, color) = linear_state_glyph("completed");
+        assert_eq!(ch, Glyph::STATUS_DONE);
+        assert_eq!(color, Palette::DONE);
+    }
+
+    #[test]
+    fn test_linear_state_glyph_canceled() {
+        let (ch, color) = linear_state_glyph("canceled");
+        assert_eq!(ch, Glyph::STATUS_CANCELLED);
+        assert_eq!(color, Palette::CANCELLED);
+    }
+
+    #[test]
+    fn test_linear_state_glyph_unknown() {
+        let (ch, color) = linear_state_glyph("unknown_type");
+        assert_eq!(ch, '?');
+        assert_eq!(color, Palette::DIM);
+    }
+
+    // -- section_header tests --
+
+    #[test]
+    fn test_section_header_has_title() {
+        let line = section_header("My Section");
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "My Section");
+    }
+
+    #[test]
+    fn test_section_header_is_dim_styled() {
+        let line = section_header("Header");
+        let style = line.spans[0].style;
+        assert_eq!(style.fg, Some(Palette::DIM));
+    }
+
+    // -- blocked_reason_line tests --
+
+    #[test]
+    fn test_blocked_reason_line_contains_reason() {
+        let line = blocked_reason_line("waiting on CI");
+        let reason_span = line.spans.iter().find(|s| s.content == "waiting on CI");
+        assert!(
+            reason_span.is_some(),
+            "reason text should be in the line spans"
+        );
+        let span = reason_span.unwrap();
+        assert_eq!(span.style.fg, Some(Palette::BLOCKED));
+        assert!(span.style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn test_blocked_reason_line_has_glyph() {
+        let line = blocked_reason_line("reason");
+        let glyph_span = line
+            .spans
+            .iter()
+            .find(|s| s.content == Glyph::BLOCKED_REASON.to_string());
+        assert!(
+            glyph_span.is_some(),
+            "blocked reason glyph should be present"
+        );
+        assert_eq!(glyph_span.unwrap().style.fg, Some(Palette::BLOCKED));
+    }
+}
