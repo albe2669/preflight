@@ -1,10 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/entity",
     "crates/migration",
-    "crates/core",
-    "crates/sync",
     "crates/graphql",
     "crates/server",
     "crates/todo",
@@ -22,10 +19,7 @@ publish = false
 
 [workspace.dependencies]
 # Workspace-internal crates.
-entity = { path = "crates/entity" }
 migration = { path = "crates/migration" }
-preflight-core = { path = "crates/core" }
-sync = { path = "crates/sync" }
 graphql = { path = "crates/graphql" }
 todo-domain = { path = "crates/todo" }
 github = { path = "crates/github" }

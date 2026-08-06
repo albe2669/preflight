@@ -32,3 +32,4 @@ tokio = { workspace = true }
 migration.workspace = true
 async-trait.workspace = true
 pretty_assertions = "1"
+chrono-tz.workspace = true
