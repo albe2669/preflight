@@ -1036,3 +1036,208 @@ mod tests {
         assert!(groups.is_empty());
     }
 }
+#[cfg(test)]
+mod render_tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use crate::app::{App, Mode, View};
+    use crate::gql::SyncState;
+    use crate::test_support::buffer_text;
+    use crate::theme::Glyph;
+
+    use super::render_frame;
+
+    fn render_frame_text(app: &App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                render_frame(f, app, f.area());
+            })
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_render_frame_shows_date_with_weekday() {
+        let app = App {
+            logical_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 6).unwrap(),
+            ..Default::default()
+        };
+        let text = render_frame_text(&app);
+        assert!(
+            text.contains("Thu"),
+            "expected weekday 'Thu' in frame, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("2026-08-06"),
+            "expected date '2026-08-06' in frame, got:\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_render_frame_tab_bar_highlights_active_view() {
+        let app = App {
+            view: View::Backlog,
+            ..Default::default()
+        };
+        let text = render_frame_text(&app);
+
+        // All five tab labels should appear
+        assert!(
+            text.contains("Today"),
+            "expected 'Today' tab label, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("Backlog"),
+            "expected 'Backlog' tab label, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("Inbox"),
+            "expected 'Inbox' tab label, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("Review"),
+            "expected 'Review' tab label, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("Sync"),
+            "expected 'Sync' tab label, got:\n{}",
+            text
+        );
+
+        // Active view label is surrounded by spaces (rendered as " Backlog ")
+        let tab_line = text.lines().nth(1).unwrap();
+        assert!(
+            tab_line.contains(" Backlog "),
+            "expected active tab ' Backlog ' with surrounding spaces, got tab line:\n{}",
+            tab_line
+        );
+    }
+
+    #[test]
+    fn test_render_frame_status_bar_shows_navigate_hints() {
+        let app = App {
+            view: View::Today,
+            mode: Mode::Navigate,
+            ..Default::default()
+        };
+        let text = render_frame_text(&app);
+
+        // Status hints for Today/Navigate include "j/k move", "SPC status", "a add"
+        let status_line = text.lines().last().unwrap();
+        assert!(
+            status_line.contains("j/k move"),
+            "expected 'j/k move' hint in status bar, got:\n{}",
+            status_line
+        );
+        assert!(
+            status_line.contains("SPC status"),
+            "expected 'SPC status' hint in status bar, got:\n{}",
+            status_line
+        );
+        assert!(
+            status_line.contains("a add"),
+            "expected 'a add' hint in status bar, got:\n{}",
+            status_line
+        );
+    }
+
+    #[test]
+    fn test_render_frame_sync_indicator_when_syncing() {
+        let app = App {
+            data: crate::app::AppData {
+                sync: vec![SyncState {
+                    source: "github".to_string(),
+                    cursor: None,
+                    last_synced_at: None,
+                    last_status: "syncing".to_string(),
+                    last_error: None,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let text = render_frame_text(&app);
+        let status_line = text.lines().last().unwrap();
+        // When syncing, the status bar should contain one of the spinner glyphs
+        let has_spinner = Glyph::SPINNER.iter().any(|&c| status_line.contains(c));
+        assert!(
+            has_spinner,
+            "expected a spinner character in status bar when syncing, got:\n{}",
+            status_line
+        );
+    }
+
+    #[test]
+    fn test_render_frame_context_word_changes_per_view() {
+        use crate::app::tests::{make_plan_row, make_todo};
+
+        // Today view with 2 plan todos
+        let app = App {
+            view: View::Today,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "First", "started"), None),
+                    make_plan_row(2, 1, make_todo(2, "Second", "todo"), None),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let text = render_frame_text(&app);
+
+        let tab_line = text.lines().nth(1).unwrap();
+        assert!(
+            tab_line.contains("2 planned"),
+            "expected '2 planned' in context word, got tab line:\n{}",
+            tab_line
+        );
+
+        // Sync view with 3 sync entries
+        let app = App {
+            view: View::Sync,
+            data: crate::app::AppData {
+                sync: vec![
+                    SyncState {
+                        source: "github".to_string(),
+                        cursor: None,
+                        last_synced_at: None,
+                        last_status: "idle".to_string(),
+                        last_error: None,
+                    },
+                    SyncState {
+                        source: "linear".to_string(),
+                        cursor: None,
+                        last_synced_at: None,
+                        last_status: "idle".to_string(),
+                        last_error: None,
+                    },
+                    SyncState {
+                        source: "jira".to_string(),
+                        cursor: None,
+                        last_synced_at: None,
+                        last_status: "idle".to_string(),
+                        last_error: None,
+                    },
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let text = render_frame_text(&app);
+
+        let tab_line = text.lines().nth(1).unwrap();
+        assert!(
+            tab_line.contains("3 sources configured"),
+            "expected '3 sources configured' in context word, got tab line:\n{}",
+            tab_line
+        );
+    }
+}
