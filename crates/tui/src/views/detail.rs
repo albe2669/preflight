@@ -172,3 +172,44 @@ pub(crate) async fn handle(
     }
     Ok(false)
 }
+#[cfg(test)]
+mod render_tests {
+    use crate::app::tests::make_todo;
+    use crate::app::{App, DetailData, Mode};
+    use crate::test_support::buffer_text;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn render_detail(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                crate::views::detail::render_overlay(f, app, area);
+            })
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_detail_overlay_shows_title_status_and_timeline() {
+        let mut app = App {
+            mode: Mode::Detail { id: 1 },
+            data: crate::app::AppData {
+                todos: vec![make_todo(1, "My detail todo", "todo")],
+                ..Default::default()
+            },
+            detail: Some(DetailData {
+                tags: vec![],
+                events: vec![],
+            }),
+            ..Default::default()
+        };
+        let output = render_detail(&mut app);
+        assert!(output.contains("My detail todo"), "should show todo title");
+        assert!(output.contains("TIMELINE"), "should show timeline header");
+        assert!(output.contains("TODO #1"), "should show block title");
+        // status glyph for "todo" is '○'
+        assert!(output.contains('○'), "should show todo status glyph");
+    }
+}
