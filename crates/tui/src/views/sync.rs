@@ -153,3 +153,96 @@ pub(crate) async fn handle_navigate(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+mod render_tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use crate::app::App;
+    use crate::gql::SyncState;
+    use crate::test_support::buffer_text;
+
+    fn render_sync(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                super::render(f, app, area);
+            })
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_sync_renders_source_rows() {
+        let mut app = App::default();
+        app.data.sync = vec![
+            SyncState {
+                source: "github".to_string(),
+                cursor: Some("abc123".to_string()),
+                last_synced_at: None,
+                last_status: "ok".to_string(),
+                last_error: None,
+            },
+            SyncState {
+                source: "linear".to_string(),
+                cursor: None,
+                last_synced_at: None,
+                last_status: "error".to_string(),
+                last_error: Some("rate limited".to_string()),
+            },
+        ];
+
+        let output = render_sync(&mut app);
+
+        // Header row is present
+        assert!(
+            output.contains("SOURCE"),
+            "expected header with SOURCE column"
+        );
+        assert!(
+            output.contains("STATE"),
+            "expected header with STATE column"
+        );
+        assert!(
+            output.contains("LAST SYNC"),
+            "expected header with LAST SYNC column"
+        );
+        assert!(
+            output.contains("CURSOR"),
+            "expected header with CURSOR column"
+        );
+
+        // Source rows rendered
+        assert!(output.contains("github"), "expected github source row");
+        assert!(output.contains("linear"), "expected linear source row");
+
+        // Status glyphs
+        assert!(
+            output.contains("↻ ok"),
+            "expected ok status indicator for github"
+        );
+        assert!(
+            output.contains("▲ error"),
+            "expected error status indicator for linear"
+        );
+    }
+
+    #[test]
+    fn test_sync_renders_offline_message_when_empty() {
+        let mut app = App::default();
+        app.data.sync = vec![];
+
+        let output = render_sync(&mut app);
+
+        assert!(
+            output.contains("no sources configured"),
+            "expected offline message when no sync sources"
+        );
+        assert!(
+            output.contains("offline"),
+            "expected 'offline' keyword in empty sync message"
+        );
+    }
+}
