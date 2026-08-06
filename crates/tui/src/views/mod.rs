@@ -331,7 +331,8 @@ fn render_confirm(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let height = lines.len() as u16 + 4;
-    let width = 50;
+    let max_line = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let width = 50u16.max(max_line as u16 + 4);
     let x = area.x + (area.width - width) / 2;
     let y = area.y + (area.height - height) / 2;
     let rect = ratatui::layout::Rect::new(x, y, width, height);
