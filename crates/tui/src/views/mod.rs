@@ -1043,3 +1043,89 @@ mod tests {
         assert_eq!(lower[0].0, "Global");
     }
 }
+#[cfg(test)]
+mod render_tests {
+    use crate::app::{App, ConfirmAction, Mode, Toast, ToastKind, View};
+    use crate::test_support::buffer_text;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn render_full(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| crate::views::render(f, app)).unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_help_overlay_renders_keybindings() {
+        let mut app = App {
+            view: View::Today,
+            mode: Mode::Help {
+                filter: String::new(),
+            },
+            ..Default::default()
+        };
+        let output = render_full(&mut app);
+        assert!(output.contains("KEYS"), "should show help overlay title");
+        assert!(output.contains("Global"), "should show Global section");
+        assert!(output.contains("quit the app"), "should show quit keybind");
+        assert!(output.contains("move cursor"), "should show j/k keybind");
+    }
+
+    #[test]
+    fn test_confirm_dialog_renders_carryover_dates() {
+        let mut app = App {
+            mode: Mode::Confirm {
+                action: ConfirmAction::CarryOver {
+                    from: "2026-08-05".to_string(),
+                    to: "2026-08-06".to_string(),
+                },
+            },
+            ..Default::default()
+        };
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("Carry unfinished todos from 2026-08-05 into 2026-08-06?"),
+            "should show carryover message"
+        );
+        assert!(
+            output.contains("CONFIRM"),
+            "should show confirm dialog title"
+        );
+        assert!(output.contains("y confirm"), "should show confirm key hint");
+        assert!(output.contains("n cancel"), "should show cancel key hint");
+    }
+
+    #[test]
+    fn test_success_toast_renders_message() {
+        let mut app = App {
+            toast: Some(Toast {
+                kind: ToastKind::Success,
+                message: "Created".to_string(),
+                ttl: Some(std::time::Duration::from_millis(2500)),
+            }),
+            ..Default::default()
+        };
+        let output = render_full(&mut app);
+        assert!(output.contains("Created"), "should show toast message");
+        assert!(output.contains('✓'), "should show success glyph");
+    }
+
+    #[test]
+    fn test_error_toast_renders_message() {
+        let mut app = App {
+            toast: Some(Toast {
+                kind: ToastKind::Error,
+                message: "Connection failed".to_string(),
+                ttl: None,
+            }),
+            ..Default::default()
+        };
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("Connection failed"),
+            "should show toast message"
+        );
+        assert!(output.contains('▲'), "should show error glyph");
+    }
+}
