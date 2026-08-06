@@ -323,7 +323,7 @@ pub fn should_plan_after_create(view: View) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::Duration;
 
     use chrono::DateTime;
@@ -332,7 +332,7 @@ mod tests {
 
     // -- fixture helpers --
 
-    fn make_todo(id: i32, title: &str, status: &str) -> crate::gql::Todo {
+    pub(crate) fn make_todo(id: i32, title: &str, status: &str) -> crate::gql::Todo {
         crate::gql::Todo {
             id,
             title: title.to_string(),
@@ -347,7 +347,12 @@ mod tests {
         }
     }
 
-    fn make_todo_with_tags(id: i32, title: &str, status: &str, slugs: &[&str]) -> crate::gql::Todo {
+    pub(crate) fn make_todo_with_tags(
+        id: i32,
+        title: &str,
+        status: &str,
+        slugs: &[&str],
+    ) -> crate::gql::Todo {
         let nodes = slugs
             .iter()
             .map(|s| crate::gql::Tag {
@@ -369,7 +374,7 @@ mod tests {
         }
     }
 
-    fn make_plan_row(
+    pub(crate) fn make_plan_row(
         id: i32,
         position: i32,
         todo: crate::gql::Todo,
@@ -384,7 +389,7 @@ mod tests {
         }
     }
 
-    fn make_plan_row_no_todo(
+    pub(crate) fn make_plan_row_no_todo(
         id: i32,
         position: i32,
         removed_at: Option<&str>,
@@ -398,7 +403,7 @@ mod tests {
         }
     }
 
-    fn make_pr(id: i32, dismissed_at: Option<&str>) -> crate::gql::PullRequest {
+    pub(crate) fn make_pr(id: i32, dismissed_at: Option<&str>) -> crate::gql::PullRequest {
         crate::gql::PullRequest {
             id,
             owner: "owner".to_string(),
@@ -414,7 +419,7 @@ mod tests {
         }
     }
 
-    fn make_linear(id: i32, dismissed_at: Option<&str>) -> crate::gql::LinearIssue {
+    pub(crate) fn make_linear(id: i32, dismissed_at: Option<&str>) -> crate::gql::LinearIssue {
         crate::gql::LinearIssue {
             id,
             identifier: format!("PROJ-{id}"),
@@ -430,7 +435,7 @@ mod tests {
         }
     }
 
-    fn make_sync(source: &str) -> crate::gql::SyncState {
+    pub(crate) fn make_sync(source: &str) -> crate::gql::SyncState {
         crate::gql::SyncState {
             source: source.to_string(),
             cursor: None,

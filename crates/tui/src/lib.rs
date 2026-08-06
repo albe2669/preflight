@@ -205,3 +205,21 @@ pub fn content_area(f: &Frame) -> Rect {
     ])
     .split(area)[1]
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// Extract visible text from a TestBackend buffer, one line per row,
+    /// trimming trailing whitespace.
+    pub(crate) fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area;
+        (0..area.height)
+            .map(|y| {
+                let line: String = (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect();
+                line.trim_end().to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
