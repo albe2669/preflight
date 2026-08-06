@@ -35,6 +35,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if let Mode::Detail { .. } = &app.mode {
         detail::render_overlay(f, app, area);
     }
+    if let Mode::Help = &app.mode {
+        render_help(f, app, area);
+    }
     if let Mode::Confirm { .. } = &app.mode {
         render_confirm(f, app, area);
     }
@@ -60,6 +63,104 @@ fn render_toast(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ratatui::widgets::Paragraph::new(line).style(Style::default().bg(Palette::SURFACE)),
         rect,
     );
+}
+
+fn render_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+
+    let width = 56.min(area.width);
+    let height = 24.min(area.height);
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y + (area.height - height) / 2;
+    let rect = ratatui::layout::Rect::new(x, y, width, height);
+
+    f.render_widget(Clear, rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::ACCENT))
+        .title(Span::styled(" KEYS ", Style::default().fg(Palette::ACCENT)));
+    f.render_widget(block, rect);
+
+    let lines = vec![
+        Line::from(Span::styled("Global", Style::default().fg(Palette::DIM))),
+        Line::from(vec![
+            Span::styled("  q         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("quit the app"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Tab       ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("next view"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift-Tab ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("previous view"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ?         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("this help"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc       ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("close overlay / cancel action"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("Today", Style::default().fg(Palette::DIM))),
+        Line::from(vec![
+            Span::styled("  j/k       ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("move cursor"),
+        ]),
+        Line::from(vec![
+            Span::styled("  SPC       ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("cycle status"),
+        ]),
+        Line::from(vec![
+            Span::styled("  a         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("add todo (inline)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  e / Enter ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("edit title / open detail"),
+        ]),
+        Line::from(vec![
+            Span::styled("  J/K       ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("reorder (armed mode)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  x         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("unplan from today"),
+        ]),
+        Line::from(vec![
+            Span::styled("  c         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("carry over yesterday's unfinished"),
+        ]),
+        Line::from(vec![
+            Span::styled("  b         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("go to backlog"),
+        ]),
+        Line::from(vec![
+            Span::styled("  R         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("review yesterday"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("Backlog", Style::default().fg(Palette::DIM))),
+        Line::from(vec![
+            Span::styled("  /         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("search / filter"),
+        ]),
+        Line::from(vec![
+            Span::styled("  t         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("plan for today"),
+        ]),
+        Line::from(vec![
+            Span::styled("  D         ", Style::default().fg(Palette::ACCENT)),
+            Span::raw("toggle done group"),
+        ]),
+    ];
+
+    let inner = ratatui::layout::Rect::new(x + 1, y + 1, width - 2, height - 2);
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 fn render_confirm(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {

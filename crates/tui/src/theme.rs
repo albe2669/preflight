@@ -11,7 +11,7 @@ use ratatui::style::Color;
 pub struct Palette;
 
 impl Palette {
-    pub const BG: Color = Color::Rgb(11, 14, 19); // #0B0E13
+    pub const BG: Color = Color::Reset; // transparent — use terminal's native bg
     pub const SURFACE: Color = Color::Rgb(18, 22, 29); // #12161D
     pub const ROW_HIGHLIGHT: Color = Color::Rgb(27, 33, 48); // #1B2130
     pub const BORDER: Color = Color::Rgb(42, 49, 60); // #2A313C

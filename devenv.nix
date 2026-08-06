@@ -35,8 +35,7 @@ in
   # https://devenv.sh/processes/
   processes = {
     "server" = {
-      exec = "cargo run";
-      cwd = builtins.toString serverDir;
+      exec = "cargo run -p server";
       watch = {
         paths = [
           ./crates/server

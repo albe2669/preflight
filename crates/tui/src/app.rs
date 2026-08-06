@@ -49,6 +49,7 @@ pub enum Mode {
     Reorder { source_id: i32 },
     Confirm { action: ConfirmAction },
     Detail { id: i32 },
+    Help,
 }
 
 /// Destructive actions that require confirmation per the design.

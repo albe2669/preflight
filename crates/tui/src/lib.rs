@@ -135,22 +135,23 @@ async fn handle_key(
 
     // Global keys.
     match key {
-        Char('q') if app.mode == Mode::Navigate && app.view != View::Today => {}
-        Char('Q') => return Ok(true),
-        Tab
-            if app.mode == Mode::Navigate => {
-                let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
-                app.view = View::ALL[(idx + 1) % View::ALL.len()];
-                app.cursor = 0;
-                return Ok(false);
-            }
-        BackTab
-            if app.mode == Mode::Navigate => {
-                let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
-                app.view = View::ALL[(idx + View::ALL.len() - 1) % View::ALL.len()];
-                app.cursor = 0;
-                return Ok(false);
-            }
+        Char('q') if app.mode == Mode::Navigate => return Ok(true),
+        Tab if app.mode == Mode::Navigate => {
+            let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
+            app.view = View::ALL[(idx + 1) % View::ALL.len()];
+            app.cursor = 0;
+            return Ok(false);
+        }
+        BackTab if app.mode == Mode::Navigate => {
+            let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
+            app.view = View::ALL[(idx + View::ALL.len() - 1) % View::ALL.len()];
+            app.cursor = 0;
+            return Ok(false);
+        }
+        Char('?') if app.mode == Mode::Navigate => {
+            app.mode = Mode::Help;
+            return Ok(false);
+        }
         Esc => {
             app.mode = Mode::Navigate;
             app.toast = None;
@@ -173,6 +174,10 @@ async fn handle_key(
         Mode::Reorder { source_id } => views::handle_reorder(app, key, client, tx, source_id).await,
         Mode::Confirm { action } => views::handle_confirm(app, key, client, tx, &action).await,
         Mode::Detail { id } => views::handle_detail(app, key, client, tx, id).await,
+        Mode::Help => {
+            app.mode = Mode::Navigate;
+            Ok(false)
+        }
     }
 }
 
