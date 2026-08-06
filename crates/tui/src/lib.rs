@@ -67,6 +67,7 @@ pub async fn run(endpoint: &str) -> anyhow::Result<()> {
 pub(crate) enum AppMsg {
     FetchAll(gql::FetchAll),
     DailyReview(gql::DailyReview),
+    DetailData(i32, Vec<gql::TodoEvent>),
     Toast(ToastKind, String),
     Refresh,
 }
@@ -99,6 +100,13 @@ async fn run_loop(
             match msg {
                 AppMsg::FetchAll(d) => app.data = crate::app::AppData::from_fetch_all(d),
                 AppMsg::DailyReview(r) => app.review = Some(r),
+                AppMsg::DetailData(id, events) => {
+                    app.detail = Some(crate::app::DetailData {
+                        tags: Vec::new(),
+                        events,
+                    });
+                    let _ = id;
+                }
                 AppMsg::Toast(k, m) => app.set_toast(k, m),
                 AppMsg::Refresh => {
                     let date = app.logical_date.format("%Y-%m-%d").to_string();
@@ -149,7 +157,10 @@ async fn handle_key(
             return Ok(false);
         }
         Char('?') if app.mode == Mode::Navigate => {
-            app.mode = Mode::Help;
+            app.mode = Mode::Help {
+                filter: String::new(),
+            };
+            app.help_scroll = 0;
             return Ok(false);
         }
         Esc => {
@@ -174,10 +185,12 @@ async fn handle_key(
         Mode::Reorder { source_id } => views::handle_reorder(app, key, client, tx, source_id).await,
         Mode::Confirm { action } => views::handle_confirm(app, key, client, tx, &action).await,
         Mode::Detail { id } => views::handle_detail(app, key, client, tx, id).await,
-        Mode::Help => {
-            app.mode = Mode::Navigate;
-            Ok(false)
-        }
+        Mode::Help { filter } => views::handle_help(app, key, &filter),
+        Mode::StatusSelect {
+            id,
+            selection,
+            reason,
+        } => views::handle_status_select(app, key, client, tx, id, selection, reason).await,
     }
 }
 

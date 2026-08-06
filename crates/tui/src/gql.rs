@@ -52,6 +52,7 @@ pub struct Todo {
     pub started_at: Option<String>,
     #[cynic(rename = "closedAt")]
     pub closed_at: Option<String>,
+    pub tag: TagConnection,
 }
 
 #[derive(cynic::QueryFragment, Clone, Debug)]
@@ -140,6 +141,11 @@ pub struct Tag {
     pub name: String,
 }
 
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "TagConnection")]
+pub struct TagConnection {
+    pub nodes: Vec<Tag>,
+}
 #[derive(cynic::QueryFragment, Clone, Debug)]
 #[cynic(graphql_type = "TodoConnection")]
 pub struct TodoConnection {

@@ -192,10 +192,22 @@ fn status_hints(app: &App) -> String {
         (_, crate::app::Mode::Search { .. }) => "type to filter · esc clears".into(),
         (_, crate::app::Mode::Reorder { .. }) => "J/K move · enter drop · esc abort".into(),
         (_, crate::app::Mode::Confirm { .. }) => "y confirm · n cancel".into(),
-        (View::Today, _) => {
-            "j/k move  SPC status  a add  J/K reorder  x unplan  enter detail  ? keys".into()
+        (
+            _,
+            crate::app::Mode::StatusSelect {
+                reason: Some(_), ..
+            },
+        ) => "type reason · enter commit · esc cancel".into(),
+        (_, crate::app::Mode::StatusSelect { .. }) => {
+            "j/k move  1-5 select  enter commit  esc cancel".into()
         }
-        (View::Backlog, _) => "/ search  t plan today  SPC status  # tag  D show done".into(),
+        (_, crate::app::Mode::Help { .. }) => "type to filter · esc close".into(),
+        (View::Today, _) => {
+            "j/k move  SPC status  a add  e edit  enter detail  D done  ? keys".into()
+        }
+        (View::Backlog, _) => {
+            "/ search  t plan today  SPC status  D done  enter detail  a add".into()
+        }
         (View::Inbox, _) => {
             "C convert  L link  d dismiss  o open url  s sync group  D show dismissed".into()
         }
@@ -396,12 +408,288 @@ pub fn panel<'a>(title: Option<&str>, focused: bool) -> Block<'a> {
     b
 }
 
+// ---- Shared grouped-by-state list renderer (D3) ----
+
+use crate::app::STATUS_ORDER;
+
+/// A group of rows under a state header, ready to render.
+#[derive(Clone, Debug)]
+pub struct GroupedSection<'a> {
+    pub label: &'static str,
+    pub status: &'static str,
+    pub rows: Vec<&'a Todo>,
+    pub collapsed: bool,
+}
+/// Group todos by status in the fixed display order (started, blocked, todo,
+/// done, cancelled). Empty groups are elided, except `done` which is kept as
+/// a collapsed header when `show_done` is false (the done-toggle).
+pub fn group_by_status<'a>(rows: &'a [&'a Todo], show_done: bool) -> Vec<GroupedSection<'a>> {
+    let mut groups: Vec<GroupedSection<'a>> = Vec::new();
+    for &status in STATUS_ORDER.iter() {
+        let matching: Vec<&Todo> = rows
+            .iter()
+            .copied()
+            .filter(|t| t.status == status)
+            .collect();
+        if matching.is_empty() {
+            continue;
+        }
+        let label = match status {
+            "started" => "STARTED",
+            "blocked" => "BLOCKED",
+            "todo" => "TODO",
+            "done" => "DONE",
+            "cancelled" => "CANCELLED",
+            _ => status,
+        };
+        groups.push(GroupedSection {
+            label,
+            status,
+            rows: matching,
+            collapsed: false,
+        });
+    }
+    // Done-toggle: when show_done is false, keep the done group but mark it
+    // collapsed so the renderer shows only the header with the count.
+    if !show_done {
+        for g in groups.iter_mut() {
+            if g.status == "done" {
+                g.collapsed = true;
+            }
+        }
+    }
+    groups
+}
+
+/// Render the grouped list into `area` as a stateful `List` widget. The
+/// `cursor` selects the highlighted row; `show_done` controls the done
+/// group expansion. The inline-create prompt (if any) and per-view hints
+/// are appended by the caller via `trailing_items`.
+pub fn render_grouped_list<'a>(
+    f: &mut Frame,
+    area: Rect,
+    groups: &[GroupedSection<'a>],
+    cursor: usize,
+    trailing_items: Vec<ListItem<'a>>,
+) -> ListState {
+    let mut items: Vec<ListItem<'a>> = Vec::new();
+    let mut row_idx: usize = 0;
+
+    for group in groups {
+        let collapsed = group.collapsed;
+        let header = if collapsed {
+            format!(
+                "  {} · {} (collapsed — press D to expand)",
+                group.label,
+                group.rows.len()
+            )
+        } else {
+            format!("  {} · {}", group.label, group.rows.len())
+        };
+        items.push(ListItem::new(Line::from(Span::styled(
+            header,
+            Style::default().fg(Palette::DIM),
+        ))));
+
+        if collapsed {
+            continue;
+        }
+
+        for todo in group.rows.iter() {
+            let is_cursor = row_idx == cursor;
+            let line = grouped_todo_line(todo, is_cursor);
+            if is_cursor {
+                items.push(ListItem::new(line).style(Style::default().bg(Palette::ROW_HIGHLIGHT)));
+            } else {
+                items.push(ListItem::new(line));
+            }
+            // Blocked reason continuation line.
+            if todo.status == "blocked" {
+                if let Some(reason) = &todo.blocked_reason {
+                    items.push(ListItem::new(blocked_reason_line(reason)));
+                }
+            }
+            row_idx += 1;
+        }
+        items.push(ListItem::new(Line::from("")));
+    }
+
+    items.extend(trailing_items);
+
+    let list = List::new(items)
+        .style(Style::default().bg(Palette::BG).fg(Palette::TEXT))
+        .highlight_style(Style::default().bg(Palette::ROW_HIGHLIGHT));
+
+    let mut state = ListState::default();
+    state.select(Some(cursor));
+    f.render_stateful_widget(list, area, &mut state);
+    state
+}
+
+/// Format a todo row for the grouped layout (no position column).
+fn grouped_todo_line(todo: &Todo, is_cursor: bool) -> Line<'_> {
+    let (glyph, color) = status_glyph(&todo.status);
+    let marker = if is_cursor {
+        Span::styled(
+            Glyph::CURSOR.to_string(),
+            Style::default().fg(Palette::ACCENT),
+        )
+    } else {
+        Span::raw(" ")
+    };
+    let title_style = match todo.status.as_str() {
+        "started" => Style::default()
+            .fg(Palette::TEXT)
+            .add_modifier(Modifier::BOLD),
+        "done" => Style::default().fg(Palette::DIM),
+        "cancelled" => Style::default()
+            .fg(Palette::CANCELLED)
+            .add_modifier(Modifier::CROSSED_OUT),
+        _ => Style::default().fg(Palette::TEXT),
+    };
+    Line::from(vec![
+        marker,
+        Span::raw("  "),
+        Span::styled(glyph.to_string(), Style::default().fg(color)),
+        Span::raw(" "),
+        Span::styled(todo.title.clone(), title_style),
+    ])
+}
+
+/// Render the info sidebar for the highlighted todo (D4). Reads the todo
+/// from the cursor position; shows status, tags, timestamps, blocked reason.
+pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
+    let todo = sidebar_todo(app);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::BORDER))
+        .title(Span::styled(" TODO ", Style::default().fg(Palette::DIM)));
+    f.render_widget(block, area);
+
+    let inner = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    );
+    if inner.height == 0 {
+        return;
+    }
+
+    let Some(todo) = todo else {
+        let line = Line::from(Span::styled(
+            "no todo highlighted",
+            Style::default().fg(Palette::GHOST),
+        ));
+        f.render_widget(Paragraph::new(line), inner);
+        return;
+    };
+
+    let (glyph, color) = status_glyph(&todo.status);
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Status line.
+    lines.push(Line::from(vec![
+        Span::styled(glyph.to_string(), Style::default().fg(color)),
+        Span::raw(" "),
+        Span::styled(
+            todo.status.clone(),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    // Title.
+    lines.push(Line::from(Span::styled(
+        todo.title.clone(),
+        Style::default().fg(Palette::TEXT),
+    )));
+    lines.push(Line::from(""));
+
+    // Tags.
+    if !todo.tag.nodes.is_empty() {
+        let tag_strs: Vec<String> = todo
+            .tag
+            .nodes
+            .iter()
+            .map(|t| format!("#{}", t.slug))
+            .collect();
+        lines.push(Line::from(Span::styled(
+            format!("tags  {}", tag_strs.join(" ")),
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+
+    // Timestamps.
+    let created = todo.created_at.split(' ').next().unwrap_or("");
+    lines.push(Line::from(Span::styled(
+        format!("created  {created}"),
+        Style::default().fg(Palette::DIM),
+    )));
+    if let Some(started) = &todo.started_at {
+        let s = started.split(' ').next().unwrap_or("");
+        lines.push(Line::from(Span::styled(
+            format!("started  {s}"),
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+    if let Some(closed) = &todo.closed_at {
+        let c = closed.split(' ').next().unwrap_or("");
+        lines.push(Line::from(Span::styled(
+            format!("closed   {c}"),
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+
+    // Blocked reason.
+    if todo.status == "blocked" {
+        if let Some(reason) = &todo.blocked_reason {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    Glyph::BLOCKED_REASON.to_string(),
+                    Style::default().fg(Palette::BLOCKED),
+                ),
+                Span::raw(" "),
+                Span::styled(reason.clone(), Style::default().fg(Palette::BLOCKED)),
+            ]));
+        }
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Resolve the highlighted todo for the sidebar: the cursor todo from the
+/// active view's row set at draw time.
+fn sidebar_todo(app: &crate::app::App) -> Option<&Todo> {
+    match app.view {
+        crate::app::View::Today => app.today_plan().get(app.cursor).copied(),
+        crate::app::View::Backlog => app.backlog().get(app.cursor).copied(),
+        _ => None,
+    }
+}
+
+/// Split the content area into a list (75%) + sidebar (25%) when wide
+/// enough. Below 100 cols, returns the full area as the list and `None`
+/// for the sidebar (D4).
+pub fn split_content(area: Rect) -> (Rect, Option<Rect>) {
+    if area.width < 100 {
+        return (area, None);
+    }
+    let sidebar_width = (area.width / 4).max(25);
+    let list_width = area.width.saturating_sub(sidebar_width);
+    let list_area = Rect::new(area.x, area.y, list_width, area.height);
+    let sidebar_area = Rect::new(area.x + list_width, area.y, sidebar_width, area.height);
+    (list_area, Some(sidebar_area))
+}
+
 #[cfg(test)]
 mod tests {
+    use ratatui::layout::Rect;
     use ratatui::style::Modifier;
 
     use crate::frame::{
-        blocked_reason_line, linear_state_glyph, pr_state_glyph, section_header, status_glyph,
+        blocked_reason_line, group_by_status, linear_state_glyph, pr_state_glyph, section_header,
+        split_content, status_glyph,
     };
     use crate::theme::{Glyph, Palette};
 
@@ -580,5 +868,162 @@ mod tests {
             "blocked reason glyph should be present"
         );
         assert_eq!(glyph_span.unwrap().style.fg, Some(Palette::BLOCKED));
+    }
+
+    // -- group_by_status tests (task 3.2) --
+
+    fn make_todo(id: i32, status: &str) -> crate::gql::Todo {
+        crate::gql::Todo {
+            id,
+            title: format!("Todo {id}"),
+            description: None,
+            status: status.to_string(),
+            blocked_reason: None,
+            sort_key: id,
+            created_at: "2026-08-05 10:00:00 +00:00".to_string(),
+            started_at: None,
+            closed_at: None,
+            tag: crate::gql::TagConnection { nodes: vec![] },
+        }
+    }
+
+    fn make_titled_todo(id: i32, title: &str, status: &str) -> crate::gql::Todo {
+        crate::gql::Todo {
+            id,
+            title: title.to_string(),
+            description: None,
+            status: status.to_string(),
+            blocked_reason: None,
+            sort_key: id,
+            created_at: "2026-08-05 10:00:00 +00:00".to_string(),
+            started_at: None,
+            closed_at: None,
+            tag: crate::gql::TagConnection { nodes: vec![] },
+        }
+    }
+
+    #[test]
+    fn test_group_by_status_empty_groups_skipped() {
+        let t1 = make_todo(1, "started");
+        let t2 = make_todo(2, "done");
+        let rows: Vec<&crate::gql::Todo> = vec![&t1, &t2];
+        let groups = group_by_status(&rows, true);
+        // Only started and done have rows; blocked, todo, cancelled are skipped.
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].status, "started");
+        assert_eq!(groups[1].status, "done");
+    }
+
+    #[test]
+    fn test_group_by_status_fixed_order() {
+        let t1 = make_todo(1, "cancelled");
+        let t2 = make_todo(2, "todo");
+        let t3 = make_todo(3, "started");
+        let t4 = make_todo(4, "blocked");
+        let t5 = make_todo(5, "done");
+        let rows: Vec<&crate::gql::Todo> = vec![&t1, &t2, &t3, &t4, &t5];
+        let groups = group_by_status(&rows, true);
+        assert_eq!(groups.len(), 5);
+        assert_eq!(groups[0].status, "started");
+        assert_eq!(groups[1].status, "blocked");
+        assert_eq!(groups[2].status, "todo");
+        assert_eq!(groups[3].status, "done");
+        assert_eq!(groups[4].status, "cancelled");
+    }
+
+    #[test]
+    fn test_group_by_status_done_collapsed_when_show_done_false() {
+        let t1 = make_todo(1, "todo");
+        let t2 = make_todo(2, "done");
+        let t3 = make_todo(3, "done");
+        let rows: Vec<&crate::gql::Todo> = vec![&t1, &t2, &t3];
+        let groups = group_by_status(&rows, false);
+        let done_group = groups.iter().find(|g| g.status == "done").unwrap();
+        assert!(done_group.collapsed);
+        // Rows are kept so the count is correct.
+        assert_eq!(done_group.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_group_by_status_done_expanded_when_show_done_true() {
+        let t1 = make_todo(1, "done");
+        let rows: Vec<&crate::gql::Todo> = vec![&t1];
+        let groups = group_by_status(&rows, true);
+        let done_group = groups.iter().find(|g| g.status == "done").unwrap();
+        assert!(!done_group.collapsed);
+        assert_eq!(done_group.rows.len(), 1);
+    }
+
+    // -- split_content tests (task 9.4) --
+
+    #[test]
+    fn test_split_content_narrow_returns_full_area_no_sidebar() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (list, sidebar) = split_content(area);
+        assert_eq!(list, area);
+        assert!(sidebar.is_none());
+    }
+
+    #[test]
+    fn test_split_content_wide_splits_list_and_sidebar() {
+        let area = Rect::new(0, 0, 120, 24);
+        let (list, sidebar) = split_content(area);
+        assert!(list.width < area.width);
+        assert!(sidebar.is_some());
+        let sb = sidebar.unwrap();
+        assert!(sb.width >= 25);
+        assert_eq!(list.width + sb.width, area.width);
+    }
+
+    #[test]
+    fn test_split_content_boundary_99_no_sidebar() {
+        let area = Rect::new(0, 0, 99, 24);
+        let (_, sidebar) = split_content(area);
+        assert!(sidebar.is_none());
+    }
+
+    #[test]
+    fn test_split_content_boundary_100_has_sidebar() {
+        let area = Rect::new(0, 0, 100, 24);
+        let (_, sidebar) = split_content(area);
+        assert!(sidebar.is_some());
+    }
+
+    #[test]
+    fn test_group_by_status_with_filter_end_to_end() {
+        // Three todos: two match "rust", one doesn't.
+        let t1 = make_titled_todo(1, "Write Rust docs", "started");
+        let t2 = make_titled_todo(2, "Review PR", "todo");
+        let t3 = make_titled_todo(3, "Rust refactor", "done");
+        let all: Vec<&crate::gql::Todo> = vec![&t1, &t2, &t3];
+
+        // Apply filter "rust" — only t1 and t3 survive.
+        let filtered: Vec<&crate::gql::Todo> = all
+            .iter()
+            .copied()
+            .filter(|t| crate::app::matches_filter(t, "rust"))
+            .collect();
+        let groups = group_by_status(&filtered, true);
+
+        // Started has 1, done has 1, todo group is skipped (t2 filtered out).
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].status, "started");
+        assert_eq!(groups[0].rows.len(), 1);
+        assert_eq!(groups[1].status, "done");
+        assert_eq!(groups[1].rows.len(), 1);
+    }
+
+    #[test]
+    fn test_group_by_status_filter_no_matches_yields_empty() {
+        let t1 = make_titled_todo(1, "Task", "todo");
+        let all: Vec<&crate::gql::Todo> = vec![&t1];
+        let filtered: Vec<&crate::gql::Todo> = all
+            .iter()
+            .copied()
+            .filter(|t| crate::app::matches_filter(t, "zzzznonexistent"))
+            .collect();
+        assert!(filtered.is_empty());
+        let groups = group_by_status(&filtered, true);
+        assert!(groups.is_empty());
     }
 }

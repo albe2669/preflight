@@ -145,8 +145,8 @@ pub fn render_overlay(f: &mut Frame, app: &mut App, area: Rect) {
 pub(crate) async fn handle(
     app: &mut App,
     key: KeyCode,
-    client: &gql::Client,
-    tx: &mpsc::Sender<crate::AppMsg>,
+    _client: &gql::Client,
+    _tx: &mpsc::Sender<crate::AppMsg>,
     id: i32,
 ) -> anyhow::Result<bool> {
     match key {
@@ -161,22 +161,12 @@ pub(crate) async fn handle(
                 };
             }
         }
-        KeyCode::Char(' ') => {
-            if let Some(todo) = app.data.todos.iter().find(|t| t.id == id) {
-                let next = match todo.status.as_str() {
-                    "todo" => "started",
-                    "started" => "done",
-                    "done" => "todo",
-                    _ => "todo",
-                };
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.set_status(id, next, None).await.is_ok() {
-                        let _ = t.send(crate::AppMsg::Refresh).await;
-                    }
-                });
-            }
+        KeyCode::Char(' ') | KeyCode::Char('s') => {
+            app.mode = Mode::StatusSelect {
+                id,
+                selection: 0,
+                reason: None,
+            };
         }
         _ => {}
     }

@@ -40,16 +40,41 @@ impl View {
 
 /// Interaction mode. The TUI is modal: most of the time it's navigating; a
 /// few modes capture input (inline edit, search, confirm).
+///
+/// `StatusSelect` drives a centered popup: `selection` is the 0-indexed
+/// highlight among the five statuses; `reason` is `Some` only while the
+/// blocked-reason sub-prompt is active (entered when the user commits
+/// `blocked`). See design D1.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mode {
     Navigate,
-    InlineCreate { input: String },
-    InlineEdit { id: i32, input: String },
-    Search { input: String },
-    Reorder { source_id: i32 },
-    Confirm { action: ConfirmAction },
-    Detail { id: i32 },
-    Help,
+    InlineCreate {
+        input: String,
+    },
+    InlineEdit {
+        id: i32,
+        input: String,
+    },
+    Search {
+        input: String,
+    },
+    Reorder {
+        source_id: i32,
+    },
+    Confirm {
+        action: ConfirmAction,
+    },
+    Detail {
+        id: i32,
+    },
+    Help {
+        filter: String,
+    },
+    StatusSelect {
+        id: i32,
+        selection: usize,
+        reason: Option<String>,
+    },
 }
 
 /// Destructive actions that require confirmation per the design.
@@ -116,6 +141,7 @@ pub struct App {
     pub show_dismissed: bool,
     pub show_done: bool,
     pub detail: Option<DetailData>,
+    pub help_scroll: usize,
 }
 
 /// Lazy-loaded data for the detail overlay.
@@ -142,6 +168,7 @@ impl Default for App {
             show_dismissed: false,
             show_done: false,
             detail: None,
+            help_scroll: 0,
         }
     }
 }
@@ -263,6 +290,38 @@ pub fn short_clock(ts: &str) -> String {
     t.format("%H:%M").to_string()
 }
 
+/// The five todo statuses in the fixed display order used by the grouped
+/// list and the status-selection popup: started, blocked, todo, done,
+/// cancelled.
+pub const STATUS_ORDER: [&str; 5] = ["started", "blocked", "todo", "done", "cancelled"];
+
+/// Index of a status string in [`STATUS_ORDER`], or `None` if unknown.
+pub fn status_index(status: &str) -> Option<usize> {
+    STATUS_ORDER.iter().position(|s| *s == status)
+}
+
+/// Case-insensitive substring filter: a todo matches if its title or any
+/// tag slug contains `filter`. An empty filter matches everything.
+pub fn matches_filter(todo: &Todo, filter: &str) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    let needle = filter.to_lowercase();
+    if todo.title.to_lowercase().contains(&needle) {
+        return true;
+    }
+    todo.tag
+        .nodes
+        .iter()
+        .any(|t| t.slug.to_lowercase().contains(&needle))
+}
+
+/// Helper for the create-then-plan decision: a todo created from the Today
+/// view should be planned for today; from Backlog it stays unplanned.
+pub fn should_plan_after_create(view: View) -> bool {
+    view == View::Today
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -284,6 +343,29 @@ mod tests {
             created_at: "2026-08-05 10:00:00 +00:00".to_string(),
             started_at: None,
             closed_at: None,
+            tag: crate::gql::TagConnection { nodes: vec![] },
+        }
+    }
+
+    fn make_todo_with_tags(id: i32, title: &str, status: &str, slugs: &[&str]) -> crate::gql::Todo {
+        let nodes = slugs
+            .iter()
+            .map(|s| crate::gql::Tag {
+                slug: s.to_string(),
+                name: s.to_string(),
+            })
+            .collect();
+        crate::gql::Todo {
+            id,
+            title: title.to_string(),
+            description: None,
+            status: status.to_string(),
+            blocked_reason: None,
+            sort_key: id,
+            created_at: "2026-08-05 10:00:00 +00:00".to_string(),
+            started_at: None,
+            closed_at: None,
+            tag: crate::gql::TagConnection { nodes },
         }
     }
 
@@ -470,6 +552,24 @@ mod tests {
         assert_eq!(data.pulls.len(), 1);
         assert_eq!(data.sync.len(), 1);
         assert_eq!(data.sync[0].source, "github");
+    }
+
+    #[test]
+    fn test_app_data_from_fetch_all_preserves_tags() {
+        use crate::gql::FetchAll;
+        let todo = make_todo_with_tags(7, "Tagged", "todo", &["rust", "tui"]);
+        let fetch = FetchAll {
+            todo: vec![todo],
+            plan: vec![],
+            pulls: vec![],
+            linears: vec![],
+            sync: vec![],
+        };
+        let data = AppData::from_fetch_all(fetch);
+        assert_eq!(data.todos.len(), 1);
+        assert_eq!(data.todos[0].tag.nodes.len(), 2);
+        assert_eq!(data.todos[0].tag.nodes[0].slug, "rust");
+        assert_eq!(data.todos[0].tag.nodes[1].slug, "tui");
     }
 
     // -- today_plan tests --
@@ -784,5 +884,78 @@ mod tests {
         assert!(app.data.pulls.is_empty());
         assert!(app.data.linears.is_empty());
         assert!(app.data.sync.is_empty());
+    }
+
+    // -- status_order / status_index tests --
+
+    #[test]
+    fn test_status_order_has_five_in_fixed_sequence() {
+        assert_eq!(STATUS_ORDER.len(), 5);
+        assert_eq!(
+            STATUS_ORDER,
+            ["started", "blocked", "todo", "done", "cancelled"]
+        );
+    }
+
+    #[test]
+    fn test_status_index_known() {
+        assert_eq!(status_index("started"), Some(0));
+        assert_eq!(status_index("blocked"), Some(1));
+        assert_eq!(status_index("todo"), Some(2));
+        assert_eq!(status_index("done"), Some(3));
+        assert_eq!(status_index("cancelled"), Some(4));
+    }
+
+    #[test]
+    fn test_status_index_unknown_returns_none() {
+        assert!(status_index("unknown").is_none());
+        assert!(status_index("").is_none());
+    }
+
+    // -- matches_filter tests --
+
+    #[test]
+    fn test_matches_filter_empty_matches_all() {
+        let todo = make_todo(1, "Write docs", "todo");
+        assert!(matches_filter(&todo, ""));
+    }
+
+    #[test]
+    fn test_matches_filter_title_substring_case_insensitive() {
+        let todo = make_todo(1, "Write Rust docs", "todo");
+        assert!(matches_filter(&todo, "rust"));
+        assert!(matches_filter(&todo, "RUST"));
+        assert!(matches_filter(&todo, "write"));
+        assert!(!matches_filter(&todo, "python"));
+    }
+
+    #[test]
+    fn test_matches_filter_tag_slug() {
+        let todo = make_todo_with_tags(1, "Task", "todo", &["backend", "urgent"]);
+        assert!(matches_filter(&todo, "back"));
+        assert!(matches_filter(&todo, "URGENT"));
+        assert!(!matches_filter(&todo, "frontend"));
+    }
+
+    #[test]
+    fn test_matches_filter_no_tags_falls_back_to_title() {
+        let todo = make_todo(1, "Refactor", "todo");
+        assert!(matches_filter(&todo, "refac"));
+        assert!(!matches_filter(&todo, "meeting"));
+    }
+
+    // -- should_plan_after_create tests --
+
+    #[test]
+    fn test_should_plan_after_create_today() {
+        assert!(should_plan_after_create(View::Today));
+    }
+
+    #[test]
+    fn test_should_plan_after_create_backlog() {
+        assert!(!should_plan_after_create(View::Backlog));
+        assert!(!should_plan_after_create(View::Inbox));
+        assert!(!should_plan_after_create(View::Review));
+        assert!(!should_plan_after_create(View::Sync));
     }
 }
