@@ -11,7 +11,7 @@ pub enum LinkError {
     #[error("not found: {0}")]
     NotFound(String),
     #[error(transparent)]
-    Todo(#[from] todo::error::Error),
+    Todo(#[from] todo_domain::error::Error),
 }
 
 /// `transaction` returns `TransactionError<E>` where `E` is the callback's

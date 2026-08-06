@@ -1,7 +1,7 @@
 //! Convert mutations: PR/Linear issue conversion and linking.
 
 use async_graphql;
-use entity::sea_orm_active_enums::LinkRelation;
+use links::entity::enums::LinkRelation;
 use std::sync::Arc;
 
 pub struct ConvertMutations;
@@ -13,11 +13,8 @@ impl ConvertMutations {
         ctx: &async_graphql::Context<'_>,
         pullRequestId: i64,
         planToday: bool,
-    ) -> async_graphql::Result<entity::todo::Model> {
-        let svc = ctx
-            .data::<Arc<dyn preflight_core::LinkService>>()
-            .unwrap()
-            .clone();
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
+        let svc = ctx.data::<Arc<dyn links::LinkService>>().unwrap().clone();
         let todo = svc
             .todo_from_pr(pullRequestId, planToday)
             .await
@@ -30,11 +27,8 @@ impl ConvertMutations {
         todoId: i64,
         pullRequestId: i64,
         relation: LinkRelation,
-    ) -> async_graphql::Result<entity::todo::Model> {
-        let svc = ctx
-            .data::<Arc<dyn preflight_core::LinkService>>()
-            .unwrap()
-            .clone();
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
+        let svc = ctx.data::<Arc<dyn links::LinkService>>().unwrap().clone();
         let todo = svc
             .link_pr(todoId, pullRequestId, relation)
             .await
@@ -45,11 +39,8 @@ impl ConvertMutations {
     pub async fn dismissPullRequest(
         ctx: &async_graphql::Context<'_>,
         id: i64,
-    ) -> async_graphql::Result<entity::pull_request::Model> {
-        let svc = ctx
-            .data::<Arc<dyn preflight_core::LinkService>>()
-            .unwrap()
-            .clone();
+    ) -> async_graphql::Result<github::entity::pull_request::Model> {
+        let svc = ctx.data::<Arc<dyn links::LinkService>>().unwrap().clone();
         let pr = svc
             .dismiss_pr(id)
             .await
@@ -61,11 +52,8 @@ impl ConvertMutations {
         ctx: &async_graphql::Context<'_>,
         linearIssueId: i64,
         planToday: bool,
-    ) -> async_graphql::Result<entity::todo::Model> {
-        let svc = ctx
-            .data::<Arc<dyn preflight_core::LinkService>>()
-            .unwrap()
-            .clone();
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
+        let svc = ctx.data::<Arc<dyn links::LinkService>>().unwrap().clone();
         let todo = svc
             .todo_from_linear(linearIssueId, planToday)
             .await
@@ -77,11 +65,8 @@ impl ConvertMutations {
         ctx: &async_graphql::Context<'_>,
         todoId: i64,
         linearIssueId: i64,
-    ) -> async_graphql::Result<entity::todo::Model> {
-        let svc = ctx
-            .data::<Arc<dyn preflight_core::LinkService>>()
-            .unwrap()
-            .clone();
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
+        let svc = ctx.data::<Arc<dyn links::LinkService>>().unwrap().clone();
         let todo = svc
             .link_linear(todoId, linearIssueId)
             .await

@@ -1,12 +1,12 @@
 [package]
-name = "todo"
+name = "todo-domain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [lib]
-name = "todo"
+name = "todo_domain"
 path = "src/lib.rs"
 
 [dependencies]

@@ -12,3 +12,9 @@ pub mod todo_tag;
 pub mod enums;
 
 seaography::register_entity_modules!([todo, todo_day_plan, todo_event, todo_tag, tag]);
+
+seaography::impl_custom_output_type_for_entity!(todo::Model);
+seaography::impl_custom_output_type_for_entity!(tag::Model);
+seaography::impl_custom_output_type_for_entity!(todo_tag::Model);
+seaography::impl_custom_output_type_for_entity!(todo_day_plan::Model);
+seaography::impl_custom_output_type_for_entity!(todo_event::Model);

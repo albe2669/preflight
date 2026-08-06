@@ -22,9 +22,9 @@ pub enum Relation {
     )]
     LinearIssue,
     #[sea_orm(
-        belongs_to = "todo::entity::todo::Entity",
+        belongs_to = "todo_domain::entity::todo::Entity",
         from = "Column::TodoId",
-        to = "todo::entity::todo::Column::Id",
+        to = "todo_domain::entity::todo::Column::Id",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
@@ -37,7 +37,7 @@ impl Related<linear::entity::linear_issue::Entity> for Entity {
     }
 }
 
-impl Related<todo::entity::todo::Entity> for Entity {
+impl Related<todo_domain::entity::todo::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Todo.def()
     }
@@ -49,6 +49,6 @@ impl ActiveModelBehavior for ActiveModel {}
 pub enum RelatedEntity {
     #[sea_orm(entity = "linear::entity::linear_issue::Entity")]
     LinearIssue,
-    #[sea_orm(entity = "todo::entity::todo::Entity")]
+    #[sea_orm(entity = "todo_domain::entity::todo::Entity")]
     Todo,
 }

@@ -15,15 +15,19 @@ use sea_orm::{
     QueryFilter, Set, TransactionTrait,
 };
 use std::sync::Arc;
-use todo::entity::enums::{EventActor, EventKind, TodoStatus};
-use todo::entity::tag::{ActiveModel as TagActiveModel, Entity as TagEntity};
-use todo::entity::todo::{ActiveModel as TodoActiveModel, Entity as TodoEntity, Model as Todo};
-use todo::entity::todo_tag::{self, ActiveModel as TodoTagActiveModel, Entity as TodoTagEntity};
+use todo_domain::entity::enums::{EventActor, EventKind, TodoStatus};
+use todo_domain::entity::tag::{ActiveModel as TagActiveModel, Entity as TagEntity};
+use todo_domain::entity::todo::{
+    ActiveModel as TodoActiveModel, Entity as TodoEntity, Model as Todo,
+};
+use todo_domain::entity::todo_tag::{
+    self, ActiveModel as TodoTagActiveModel, Entity as TodoTagEntity,
+};
 
 use crate::error::{LinkError, Result};
-use todo::clock::{Clock, now_tz};
-use todo::day_plan::DayPlanService;
-use todo::events::EventWriter;
+use todo_domain::clock::{Clock, now_tz};
+use todo_domain::day_plan::DayPlanService;
+use todo_domain::events::EventWriter;
 
 use async_trait::async_trait;
 const REVIEW_SLUG: &str = "review";
@@ -68,9 +72,9 @@ impl LinkServiceImpl {
         txn: &C,
         slug: &str,
         name: Option<&str>,
-    ) -> Result<todo::entity::tag::Model> {
+    ) -> Result<todo_domain::entity::tag::Model> {
         if let Some(t) = TagEntity::find()
-            .filter(todo::entity::tag::Column::Slug.eq(slug))
+            .filter(todo_domain::entity::tag::Column::Slug.eq(slug))
             .one(txn)
             .await?
         {
@@ -450,7 +454,7 @@ impl LinkService for LinkServiceImpl {
                         .await?
                         .ok_or_else(|| LinkError::NotFound(format!("todo {todo_id}")))?;
                     let tag = TagEntity::find()
-                        .filter(todo::entity::tag::Column::Slug.eq(slug.clone()))
+                        .filter(todo_domain::entity::tag::Column::Slug.eq(slug.clone()))
                         .one(txn)
                         .await?;
                     if let Some(tag) = tag {

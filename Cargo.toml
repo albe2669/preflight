@@ -27,7 +27,7 @@ migration = { path = "crates/migration" }
 preflight-core = { path = "crates/core" }
 sync = { path = "crates/sync" }
 graphql = { path = "crates/graphql" }
-todo = { path = "crates/todo" }
+todo-domain = { path = "crates/todo" }
 github = { path = "crates/github" }
 linear = { path = "crates/linear" }
 links = { path = "crates/links" }

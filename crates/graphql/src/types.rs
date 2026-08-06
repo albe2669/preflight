@@ -2,13 +2,13 @@
 
 use seaography::CustomOutputType;
 
-// The 5 ActiveEnum → Seaography bridges now live in the `entity` crate
-// (crates/entity/src/sea_orm_active_enums.rs) to satisfy the orphan rule.
-// `register_enumeration` here builds the dynamic GraphQL Enum objects.
+// The ActiveEnum -> Seaography bridges live in their respective domain crates
+// to satisfy the orphan rule.  `register_enumeration` here builds the
+// dynamic GraphQL Enum objects.
 
 /// GraphQL representation of a daily review.
 ///
-/// `preflight_core::DailyReview` derives `Serialize`/`Deserialize` but not
+/// `todo_domain::DailyReview` derives `Serialize`/`Deserialize` but not
 /// `CustomOutputType`. This struct mirrors it and carries the derive.
 ///
 /// Entity `Model`s implement `CustomOutputType` via the `GqlModelType`
@@ -18,14 +18,14 @@ use seaography::CustomOutputType;
 #[derive(Clone, CustomOutputType)]
 pub struct DailyReview {
     pub date: chrono::NaiveDate,
-    pub planned: Vec<entity::todo::Model>,
-    pub touched: Vec<entity::todo::Model>,
-    pub completed: Vec<entity::todo::Model>,
-    pub carriedOver: Vec<entity::todo::Model>,
+    pub planned: Vec<todo_domain::entity::todo::Model>,
+    pub touched: Vec<todo_domain::entity::todo::Model>,
+    pub completed: Vec<todo_domain::entity::todo::Model>,
+    pub carriedOver: Vec<todo_domain::entity::todo::Model>,
 }
 
-impl From<preflight_core::DailyReview> for DailyReview {
-    fn from(d: preflight_core::DailyReview) -> Self {
+impl From<todo_domain::DailyReview> for DailyReview {
+    fn from(d: todo_domain::DailyReview) -> Self {
         Self {
             date: d.date,
             planned: d.planned,

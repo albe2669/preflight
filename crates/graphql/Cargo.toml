@@ -10,14 +10,16 @@ name = "graphql"
 path = "src/lib.rs"
 
 [dependencies]
-entity.workspace = true
-preflight-core.workspace = true
+todo-domain.workspace = true
+github.workspace = true
+linear.workspace = true
+links.workspace = true
+sync-state.workspace = true
 sea-orm.workspace = true
 seaography.workspace = true
 async-graphql = { workspace = true, features = ["chrono", "tokio"] }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-sync.workspace = true
 tokio = { workspace = true }
 thiserror.workspace = true

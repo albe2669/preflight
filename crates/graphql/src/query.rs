@@ -12,7 +12,7 @@ impl Queries {
         date: chrono::NaiveDate,
     ) -> async_graphql::Result<crate::types::DailyReview> {
         let review_svc = ctx
-            .data::<Arc<dyn preflight_core::ReviewService>>()
+            .data::<Arc<dyn todo_domain::ReviewService>>()
             .unwrap()
             .clone();
         let review = review_svc

@@ -46,13 +46,13 @@ impl Config {
         Ok(cfg)
     }
 
-    /// Build a `preflight_core::Clock` from the clock config.
-    pub fn clock(&self) -> anyhow::Result<preflight_core::Clock> {
+    /// Build a `todo_domain::Clock` from the clock config.
+    pub fn clock(&self) -> anyhow::Result<todo_domain::Clock> {
         let tz: chrono_tz::Tz = self
             .clock
             .timezone
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid timezone {}: {e}", self.clock.timezone))?;
-        Ok(preflight_core::Clock::new(tz, self.clock.day_start_hour))
+        Ok(todo_domain::Clock::new(tz, self.clock.day_start_hour))
     }
 }

@@ -10,11 +10,8 @@ pub struct SyncMutations;
 impl SyncMutations {
     pub async fn syncLinear(
         ctx: &async_graphql::Context<'_>,
-    ) -> async_graphql::Result<entity::sync_state::Model> {
-        let svc = ctx
-            .data::<Arc<dyn sync::linear::LinearSync>>()
-            .unwrap()
-            .clone();
+    ) -> async_graphql::Result<sync_state::entity::sync_state::Model> {
+        let svc = ctx.data::<Arc<dyn linear::LinearSync>>().unwrap().clone();
         let state = svc
             .pull()
             .await
@@ -24,11 +21,8 @@ impl SyncMutations {
 
     pub async fn syncGithub(
         ctx: &async_graphql::Context<'_>,
-    ) -> async_graphql::Result<entity::sync_state::Model> {
-        let svc = ctx
-            .data::<Arc<dyn sync::github::GithubSync>>()
-            .unwrap()
-            .clone();
+    ) -> async_graphql::Result<sync_state::entity::sync_state::Model> {
+        let svc = ctx.data::<Arc<dyn github::GithubSync>>().unwrap().clone();
         let state = svc
             .pull()
             .await

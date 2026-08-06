@@ -16,12 +16,12 @@ static CONTEXT: LazyLock<BuilderContext> = LazyLock::new(BuilderContext::default
 #[allow(clippy::too_many_arguments)]
 pub fn schema_builder(
     database: DatabaseConnection,
-    todo: Arc<dyn preflight_core::TodoService>,
-    day_plan: Arc<dyn preflight_core::DayPlanService>,
-    link: Arc<dyn preflight_core::LinkService>,
-    review: Arc<dyn preflight_core::ReviewService>,
-    github: Arc<dyn sync::github::GithubSync>,
-    linear: Arc<dyn sync::linear::LinearSync>,
+    todo: Arc<dyn todo_domain::TodoService>,
+    day_plan: Arc<dyn todo_domain::DayPlanService>,
+    link: Arc<dyn links::LinkService>,
+    review: Arc<dyn todo_domain::ReviewService>,
+    github: Arc<dyn github::GithubSync>,
+    linear: Arc<dyn linear::LinearSync>,
     depth: Option<usize>,
     complexity: Option<usize>,
 ) -> SchemaBuilder {
@@ -40,11 +40,11 @@ pub fn schema_builder(
     seaography::register_entity!(builder, sync_state, mutation: false);
 
     // Register enums so they appear as GraphQL enums and can be used as args.
-    builder.register_enumeration::<entity::sea_orm_active_enums::TodoStatus>();
-    builder.register_enumeration::<entity::sea_orm_active_enums::EventKind>();
-    builder.register_enumeration::<entity::sea_orm_active_enums::EventActor>();
-    builder.register_enumeration::<entity::sea_orm_active_enums::PullRequestState>();
-    builder.register_enumeration::<entity::sea_orm_active_enums::LinkRelation>();
+    builder.register_enumeration::<todo_domain::entity::enums::TodoStatus>();
+    builder.register_enumeration::<todo_domain::entity::enums::EventKind>();
+    builder.register_enumeration::<todo_domain::entity::enums::EventActor>();
+    builder.register_enumeration::<github::entity::enums::PullRequestState>();
+    builder.register_enumeration::<links::entity::enums::LinkRelation>();
 
     // Register custom queries.
     builder.register_custom_query::<crate::query::Queries>();

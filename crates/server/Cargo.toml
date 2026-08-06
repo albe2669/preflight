@@ -10,11 +10,13 @@ name = "server"
 path = "src/main.rs"
 
 [dependencies]
-entity.workspace = true
-migration.workspace = true
-preflight-core.workspace = true
-sync.workspace = true
+todo-domain.workspace = true
+links.workspace = true
+github.workspace = true
+linear.workspace = true
 graphql.workspace = true
+migration.workspace = true
+sync-state.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 async-graphql.workspace = true

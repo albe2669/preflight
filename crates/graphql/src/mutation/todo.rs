@@ -1,8 +1,8 @@
 //! Todo mutations: create, update, set status.
 
 use async_graphql;
-use entity::sea_orm_active_enums::TodoStatus;
 use std::sync::Arc;
+use todo_domain::entity::enums::TodoStatus;
 
 pub struct TodoMutations;
 
@@ -13,9 +13,9 @@ impl TodoMutations {
         ctx: &async_graphql::Context<'_>,
         title: String,
         description: Option<String>,
-    ) -> async_graphql::Result<entity::todo::Model> {
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
         let svc = ctx
-            .data::<Arc<dyn preflight_core::TodoService>>()
+            .data::<Arc<dyn todo_domain::TodoService>>()
             .unwrap()
             .clone();
         let todo = svc
@@ -30,9 +30,9 @@ impl TodoMutations {
         id: i64,
         title: Option<String>,
         description: Option<String>,
-    ) -> async_graphql::Result<entity::todo::Model> {
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
         let svc = ctx
-            .data::<Arc<dyn preflight_core::TodoService>>()
+            .data::<Arc<dyn todo_domain::TodoService>>()
             .unwrap()
             .clone();
         let todo = svc
@@ -47,9 +47,9 @@ impl TodoMutations {
         id: i64,
         status: TodoStatus,
         blockedReason: Option<String>,
-    ) -> async_graphql::Result<entity::todo::Model> {
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
         let svc = ctx
-            .data::<Arc<dyn preflight_core::TodoService>>()
+            .data::<Arc<dyn todo_domain::TodoService>>()
             .unwrap()
             .clone();
         let todo = svc

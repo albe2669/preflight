@@ -10,7 +10,7 @@ name = "links"
 path = "src/lib.rs"
 
 [dependencies]
-todo.workspace = true
+todo-domain.workspace = true
 github.workspace = true
 linear.workspace = true
 sea-orm.workspace = true

@@ -11,9 +11,9 @@ impl DayPlanMutations {
     pub async fn planForToday(
         ctx: &async_graphql::Context<'_>,
         todoId: i64,
-    ) -> async_graphql::Result<entity::todo_day_plan::Model> {
+    ) -> async_graphql::Result<todo_domain::entity::todo_day_plan::Model> {
         let svc = ctx
-            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .data::<Arc<dyn todo_domain::DayPlanService>>()
             .unwrap()
             .clone();
         let plan = svc
@@ -28,7 +28,7 @@ impl DayPlanMutations {
         todoId: i64,
     ) -> async_graphql::Result<bool> {
         let svc = ctx
-            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .data::<Arc<dyn todo_domain::DayPlanService>>()
             .unwrap()
             .clone();
         svc.unplan_today(todoId)
@@ -42,9 +42,9 @@ impl DayPlanMutations {
         ctx: &async_graphql::Context<'_>,
         date: chrono::NaiveDate,
         todoIds: Vec<i64>,
-    ) -> async_graphql::Result<Vec<entity::todo_day_plan::Model>> {
+    ) -> async_graphql::Result<Vec<todo_domain::entity::todo_day_plan::Model>> {
         let svc = ctx
-            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .data::<Arc<dyn todo_domain::DayPlanService>>()
             .unwrap()
             .clone();
         let plans = svc
@@ -58,9 +58,9 @@ impl DayPlanMutations {
         ctx: &async_graphql::Context<'_>,
         from: chrono::NaiveDate,
         to: chrono::NaiveDate,
-    ) -> async_graphql::Result<Vec<entity::todo_day_plan::Model>> {
+    ) -> async_graphql::Result<Vec<todo_domain::entity::todo_day_plan::Model>> {
         let svc = ctx
-            .data::<Arc<dyn preflight_core::DayPlanService>>()
+            .data::<Arc<dyn todo_domain::DayPlanService>>()
             .unwrap()
             .clone();
         let plans = svc

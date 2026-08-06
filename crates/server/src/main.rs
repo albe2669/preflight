@@ -15,20 +15,20 @@ async fn main() -> anyhow::Result<()> {
     let db = db::connect(&cfg.database.path).await?;
     db::migrate(&db).await?;
 
-    let todo_svc = Arc::new(preflight_core::todo_service::new(db.clone(), clock.clone()));
-    let day_plan_svc = Arc::new(preflight_core::day_plan::new(db.clone(), clock.clone()));
-    let link_svc = Arc::new(preflight_core::links::new(db.clone(), clock.clone()));
-    let review_svc = Arc::new(preflight_core::review::new(db.clone(), clock.clone()));
-    let github_sync = Arc::new(sync::github::new(
+    let todo_svc = Arc::new(todo_domain::todo_service::new(db.clone(), clock.clone()));
+    let day_plan_svc = Arc::new(todo_domain::day_plan::new(db.clone(), clock.clone()));
+    let link_svc = Arc::new(links::new(db.clone(), clock.clone(), day_plan_svc.clone()));
+    let review_svc = Arc::new(todo_domain::review::new(db.clone(), clock.clone()));
+    let github_sync = Arc::new(github::sync::new(
         db.clone(),
-        sync::github::GithubOptions {
+        github::sync::GithubOptions {
             token: cfg.sync.github_token.clone(),
             query: cfg.sync.github_search_query.clone(),
         },
     ));
-    let linear_sync = Arc::new(sync::linear::new(
+    let linear_sync = Arc::new(linear::sync::new(
         db.clone(),
-        sync::linear::LinearOptions {
+        linear::sync::LinearOptions {
             token: cfg.sync.linear_token.clone(),
             team_keys: cfg.sync.linear_team_keys.clone(),
         },
