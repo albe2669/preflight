@@ -4,6 +4,7 @@ members = [
     "crates/migration",
     "crates/graphql",
     "crates/server",
+    "crates/tui",
     "crates/todo",
     "crates/github",
     "crates/linear",
@@ -65,6 +66,8 @@ toml = "0.9"
 thiserror = "2"
 async-trait = "0.1"
 anyhow = "1"
+# Async utilities for the TUI.
+futures-util = "0.3"
 
 # HTTP clients for sync.
 reqwest = { version = "0.12", default-features = false, features = [

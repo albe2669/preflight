@@ -1,0 +1,25 @@
+[package]
+name = "tui"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+crossterm = "0.29"
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+futures-util = { workspace = true }
+anyhow = { workspace = true }
+cynic = "3"
+
+[build-dependencies]
+cynic-codegen = "3"
+
+[features]
+default = []
