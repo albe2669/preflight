@@ -23,3 +23,14 @@ serde_json.workspace = true
 chrono.workspace = true
 tokio = { workspace = true }
 thiserror.workspace = true
+
+[features]
+integration = []
+
+[dev-dependencies]
+sea-orm = { workspace = true }
+tokio = { workspace = true }
+migration.workspace = true
+async-trait.workspace = true
+pretty_assertions = "1"
+chrono-tz.workspace = true
