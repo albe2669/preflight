@@ -73,4 +73,30 @@ impl ConvertMutations {
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(todo)
     }
+
+    pub async fn unlinkPullRequest(
+        ctx: &async_graphql::Context<'_>,
+        todoId: i64,
+        pullRequestId: i64,
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
+        let svc = ctx.data::<Arc<dyn links::LinkService>>().unwrap().clone();
+        let todo = svc
+            .unlink_pr(todoId, pullRequestId)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(todo)
+    }
+
+    pub async fn unlinkLinearIssue(
+        ctx: &async_graphql::Context<'_>,
+        todoId: i64,
+        linearIssueId: i64,
+    ) -> async_graphql::Result<todo_domain::entity::todo::Model> {
+        let svc = ctx.data::<Arc<dyn links::LinkService>>().unwrap().clone();
+        let todo = svc
+            .unlink_linear(todoId, linearIssueId)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(todo)
+    }
 }

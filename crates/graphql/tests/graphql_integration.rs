@@ -247,6 +247,20 @@ impl links::LinkService for StubLinkService {
     ) -> links::Result<todo_domain::entity::todo::Model> {
         Ok(self.todo.clone())
     }
+    async fn unlink_pr(
+        &self,
+        _todo_id: i64,
+        _pr_id: i64,
+    ) -> links::Result<todo_domain::entity::todo::Model> {
+        Ok(self.todo.clone())
+    }
+    async fn unlink_linear(
+        &self,
+        _todo_id: i64,
+        _linear_issue_id: i64,
+    ) -> links::Result<todo_domain::entity::todo::Model> {
+        Ok(self.todo.clone())
+    }
 }
 
 struct StubGithubSync {
@@ -414,6 +428,20 @@ impl links::LinkService for FailingLinkService {
         &self,
         _todo_id: i64,
         _slug: &str,
+    ) -> links::Result<todo_domain::entity::todo::Model> {
+        Err(links::LinkError::NotFound("link".into()))
+    }
+    async fn unlink_pr(
+        &self,
+        _todo_id: i64,
+        _pr_id: i64,
+    ) -> links::Result<todo_domain::entity::todo::Model> {
+        Err(links::LinkError::NotFound("link".into()))
+    }
+    async fn unlink_linear(
+        &self,
+        _todo_id: i64,
+        _linear_issue_id: i64,
     ) -> links::Result<todo_domain::entity::todo::Model> {
         Err(links::LinkError::NotFound("link".into()))
     }
@@ -1179,6 +1207,55 @@ async fn test_link_linear_issue_returns_todo() {
         data["linkLinearIssue"]["id"],
         serde_json::json!(1),
         "should return the linked todo"
+    );
+}
+// ===========================================================================
+// Tests — custom mutation: unlinkPullRequest
+// ===========================================================================
+
+#[tokio::test]
+async fn test_unlink_pull_request_returns_todo() {
+    let db = setup_db().await;
+    let (todo, day_plan, link, review, github, linear) = stub_services();
+    let schema = build_schema(db, todo, day_plan, link, review, github, linear).await;
+
+    let resp = execute(
+        &schema,
+        r#"mutation { unlinkPullRequest(todoId: 1, pullRequestId: 1) { id title } }"#,
+    )
+    .await;
+
+    assert!(resp.errors.is_empty(), "errors: {:#?}", resp.errors);
+    let data = response_json(&resp);
+    assert_eq!(
+        data["unlinkPullRequest"]["id"],
+        serde_json::json!(1),
+        "should return the unlinked todo"
+    );
+}
+
+// ===========================================================================
+// Tests — custom mutation: unlinkLinearIssue
+// ===========================================================================
+
+#[tokio::test]
+async fn test_unlink_linear_issue_returns_todo() {
+    let db = setup_db().await;
+    let (todo, day_plan, link, review, github, linear) = stub_services();
+    let schema = build_schema(db, todo, day_plan, link, review, github, linear).await;
+
+    let resp = execute(
+        &schema,
+        r#"mutation { unlinkLinearIssue(todoId: 1, linearIssueId: 1) { id title } }"#,
+    )
+    .await;
+
+    assert!(resp.errors.is_empty(), "errors: {:#?}", resp.errors);
+    let data = response_json(&resp);
+    assert_eq!(
+        data["unlinkLinearIssue"]["id"],
+        serde_json::json!(1),
+        "should return the unlinked todo"
     );
 }
 

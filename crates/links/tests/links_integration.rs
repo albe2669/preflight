@@ -444,3 +444,168 @@ async fn test_add_tag_unknown_todo_returns_not_found() {
     let result = link_svc.add_tag(999_999, "urgent").await;
     assert!(matches!(result, Err(links::error::LinkError::NotFound(_))));
 }
+// ─── unlink_pr ─────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_unlink_pr_removes_link_row() {
+    let db = setup_db().await;
+    let clock = test_clock();
+    let todo_svc = todo_domain::todo_service::new(db.clone(), clock.clone());
+    let day_plan_svc = std::sync::Arc::new(todo_domain::day_plan::new(db.clone(), clock.clone()));
+    let link_svc = links::new(db.clone(), clock, day_plan_svc);
+
+    let todo = todo_svc.create("Task".to_string(), None).await.unwrap();
+    let pr_id = seed_pr(&db, "github", "owner", "repo", 100).await;
+
+    link_svc
+        .link_pr(todo.id, pr_id, links::entity::enums::LinkRelation::Reviews)
+        .await
+        .unwrap();
+
+    link_svc.unlink_pr(todo.id, pr_id).await.unwrap();
+
+    let link = links::entity::todo_pull_request::Entity::find()
+        .filter(links::entity::todo_pull_request::Column::TodoId.eq(todo.id))
+        .filter(links::entity::todo_pull_request::Column::PullRequestId.eq(pr_id))
+        .one(&db)
+        .await
+        .unwrap();
+    assert!(link.is_none(), "link row should be deleted");
+
+    let events = todo_domain::entity::todo_event::Entity::find()
+        .filter(todo_domain::entity::todo_event::Column::TodoId.eq(todo.id))
+        .all(&db)
+        .await
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e.kind, todo_domain::entity::enums::EventKind::UnlinkedPr)),
+        "should have an unlinked_pr event"
+    );
+}
+
+#[tokio::test]
+async fn test_unlink_pr_idempotent_no_link() {
+    let db = setup_db().await;
+    let clock = test_clock();
+    let todo_svc = todo_domain::todo_service::new(db.clone(), clock.clone());
+    let day_plan_svc = std::sync::Arc::new(todo_domain::day_plan::new(db.clone(), clock.clone()));
+    let link_svc = links::new(db.clone(), clock, day_plan_svc);
+
+    let todo = todo_svc.create("Task".to_string(), None).await.unwrap();
+    let pr_id = seed_pr(&db, "github", "owner", "repo", 101).await;
+
+    // Unlink a PR that was never linked — should be a no-op
+    let result = link_svc.unlink_pr(todo.id, pr_id).await;
+    assert!(result.is_ok(), "unlinking non-linked PR should not error");
+
+    let events = todo_domain::entity::todo_event::Entity::find()
+        .filter(todo_domain::entity::todo_event::Column::TodoId.eq(todo.id))
+        .all(&db)
+        .await
+        .unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e.kind, todo_domain::entity::enums::EventKind::UnlinkedPr)),
+        "no unlinked_pr event should be recorded for idempotent unlink"
+    );
+}
+
+#[tokio::test]
+async fn test_unlink_pr_unknown_todo_returns_not_found() {
+    let db = setup_db().await;
+    let clock = test_clock();
+    let day_plan_svc = std::sync::Arc::new(todo_domain::day_plan::new(db.clone(), clock.clone()));
+    let link_svc = links::new(db.clone(), clock, day_plan_svc);
+
+    let pr_id = seed_pr(&db, "github", "owner", "repo", 102).await;
+
+    let result = link_svc.unlink_pr(999_999, pr_id).await;
+    assert!(matches!(result, Err(links::error::LinkError::NotFound(_))));
+}
+
+// ─── unlink_linear ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_unlink_linear_removes_link_row() {
+    let db = setup_db().await;
+    let clock = test_clock();
+    let todo_svc = todo_domain::todo_service::new(db.clone(), clock.clone());
+    let day_plan_svc = std::sync::Arc::new(todo_domain::day_plan::new(db.clone(), clock.clone()));
+    let link_svc = links::new(db.clone(), clock, day_plan_svc);
+
+    let todo = todo_svc.create("Task".to_string(), None).await.unwrap();
+    let issue_id = seed_linear_issue(&db, "linear-2", "ENG-2", "Feature X").await;
+
+    link_svc.link_linear(todo.id, issue_id).await.unwrap();
+
+    link_svc.unlink_linear(todo.id, issue_id).await.unwrap();
+
+    let link = links::entity::todo_linear_issue::Entity::find()
+        .filter(links::entity::todo_linear_issue::Column::TodoId.eq(todo.id))
+        .filter(links::entity::todo_linear_issue::Column::LinearIssueId.eq(issue_id))
+        .one(&db)
+        .await
+        .unwrap();
+    assert!(link.is_none(), "link row should be deleted");
+
+    let events = todo_domain::entity::todo_event::Entity::find()
+        .filter(todo_domain::entity::todo_event::Column::TodoId.eq(todo.id))
+        .all(&db)
+        .await
+        .unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            e.kind,
+            todo_domain::entity::enums::EventKind::UnlinkedLinear
+        )),
+        "should have an unlinked_linear event"
+    );
+}
+
+#[tokio::test]
+async fn test_unlink_linear_idempotent_no_link() {
+    let db = setup_db().await;
+    let clock = test_clock();
+    let todo_svc = todo_domain::todo_service::new(db.clone(), clock.clone());
+    let day_plan_svc = std::sync::Arc::new(todo_domain::day_plan::new(db.clone(), clock.clone()));
+    let link_svc = links::new(db.clone(), clock, day_plan_svc);
+
+    let todo = todo_svc.create("Task".to_string(), None).await.unwrap();
+    let issue_id = seed_linear_issue(&db, "linear-3", "ENG-3", "Feature Y").await;
+
+    // Unlink an issue that was never linked — should be a no-op
+    let result = link_svc.unlink_linear(todo.id, issue_id).await;
+    assert!(
+        result.is_ok(),
+        "unlinking non-linked issue should not error"
+    );
+
+    let events = todo_domain::entity::todo_event::Entity::find()
+        .filter(todo_domain::entity::todo_event::Column::TodoId.eq(todo.id))
+        .all(&db)
+        .await
+        .unwrap();
+    assert!(
+        !events.iter().any(|e| matches!(
+            e.kind,
+            todo_domain::entity::enums::EventKind::UnlinkedLinear
+        )),
+        "no unlinked_linear event should be recorded for idempotent unlink"
+    );
+}
+
+#[tokio::test]
+async fn test_unlink_linear_unknown_todo_returns_not_found() {
+    let db = setup_db().await;
+    let clock = test_clock();
+    let day_plan_svc = std::sync::Arc::new(todo_domain::day_plan::new(db.clone(), clock.clone()));
+    let link_svc = links::new(db.clone(), clock, day_plan_svc);
+
+    let issue_id = seed_linear_issue(&db, "linear-4", "ENG-4", "Feature Z").await;
+
+    let result = link_svc.unlink_linear(999_999, issue_id).await;
+    assert!(matches!(result, Err(links::error::LinkError::NotFound(_))));
+}

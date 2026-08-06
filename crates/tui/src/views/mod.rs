@@ -509,7 +509,7 @@ pub(crate) async fn handle_inline_edit(
             let t = tx.clone();
             let title2 = title.clone();
             tokio::spawn(async move {
-                match c.update_todo(id, Some(&title2)).await {
+                match c.update_todo(id, Some(&title2), None).await {
                     Ok(_) => {
                         let _ = t
                             .send(crate::AppMsg::Toast(ToastKind::Success, "saved".into()))

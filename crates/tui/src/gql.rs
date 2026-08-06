@@ -180,6 +180,35 @@ pub struct TodoEventConnection {
     pub nodes: Vec<TodoEvent>,
 }
 
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "TodoPullRequest")]
+pub struct TodoPullRequest {
+    pub relation: String,
+    #[cynic(rename = "pullRequestId")]
+    pub pull_request_id: i32,
+    pub pull_request: Option<PullRequest>,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "TodoLinearIssue")]
+pub struct TodoLinearIssue {
+    #[cynic(rename = "linearIssueId")]
+    pub linear_issue_id: i32,
+    pub linear_issue: Option<LinearIssue>,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "TodoPullRequestConnection")]
+pub struct TodoPullRequestConnection {
+    pub nodes: Vec<TodoPullRequest>,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "TodoLinearIssueConnection")]
+pub struct TodoLinearIssueConnection {
+    pub nodes: Vec<TodoLinearIssue>,
+}
+
 // ---- Daily review ----
 
 #[derive(cynic::QueryFragment, Clone, Debug)]
@@ -277,6 +306,32 @@ pub struct TodoEventsVars {
     pub order: Option<TodoEventOrderInput>,
 }
 
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Query", variables = "TodoPullRequestsVars")]
+pub struct TodoPullRequestsQuery {
+    #[arguments(filters: $filters)]
+    #[cynic(rename = "todoPullRequest")]
+    pub todo_pull_request: TodoPullRequestConnection,
+}
+
+#[derive(cynic::QueryVariables, Clone, Debug)]
+pub struct TodoPullRequestsVars {
+    pub filters: Option<TodoPullRequestFilterInput>,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Query", variables = "TodoLinearIssuesVars")]
+pub struct TodoLinearIssuesQuery {
+    #[arguments(filters: $filters)]
+    #[cynic(rename = "todoLinearIssue")]
+    pub todo_linear_issue: TodoLinearIssueConnection,
+}
+
+#[derive(cynic::QueryVariables, Clone, Debug)]
+pub struct TodoLinearIssuesVars {
+    pub filters: Option<TodoLinearIssueFilterInput>,
+}
+
 // ---- Custom input objects (cynic schema markers are zero-field) ----
 
 #[derive(cynic::InputObject, Clone, Debug)]
@@ -312,6 +367,18 @@ pub struct LinearIssueFilterInput {
 #[derive(cynic::InputObject, Clone, Debug)]
 #[cynic(graphql_type = "TodoEventFilterInput")]
 pub struct TodoEventFilterInput {
+    pub todo_id: Option<IntegerFilterInput>,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "TodoPullRequestFilterInput")]
+pub struct TodoPullRequestFilterInput {
+    pub todo_id: Option<IntegerFilterInput>,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "TodoLinearIssueFilterInput")]
+pub struct TodoLinearIssueFilterInput {
     pub todo_id: Option<IntegerFilterInput>,
 }
 
@@ -539,6 +606,74 @@ pub struct SyncLinearMut {
     pub sync_linear: SyncState,
 }
 
+#[derive(cynic::Enum, Clone, Debug)]
+#[cynic(graphql_type = "LinkRelationEnum")]
+pub enum LinkRelation {
+    #[cynic(rename = "reviews")]
+    Reviews,
+    #[cynic(rename = "implements")]
+    Implements,
+    #[cynic(rename = "references")]
+    References,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "LinkPrVars")]
+pub struct LinkPullRequestMut {
+    #[arguments(todoId: $todo_id, pullRequestId: $pr_id, relation: $relation)]
+    #[cynic(rename = "linkPullRequest")]
+    pub link_pull_request: Todo,
+}
+
+#[derive(cynic::QueryVariables, Clone, Debug)]
+pub struct LinkPrVars {
+    pub todo_id: i32,
+    pub pr_id: i32,
+    pub relation: LinkRelation,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "LinkLinearVars")]
+pub struct LinkLinearIssueMut {
+    #[arguments(todoId: $todo_id, linearIssueId: $issue_id)]
+    #[cynic(rename = "linkLinearIssue")]
+    pub link_linear_issue: Todo,
+}
+
+#[derive(cynic::QueryVariables, Clone, Debug)]
+pub struct LinkLinearVars {
+    pub todo_id: i32,
+    pub issue_id: i32,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "UnlinkPrVars")]
+pub struct UnlinkPullRequestMut {
+    #[arguments(todoId: $todo_id, pullRequestId: $pr_id)]
+    #[cynic(rename = "unlinkPullRequest")]
+    pub unlink_pull_request: Todo,
+}
+
+#[derive(cynic::QueryVariables, Clone, Debug)]
+pub struct UnlinkPrVars {
+    pub todo_id: i32,
+    pub pr_id: i32,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "UnlinkLinearVars")]
+pub struct UnlinkLinearIssueMut {
+    #[arguments(todoId: $todo_id, linearIssueId: $issue_id)]
+    #[cynic(rename = "unlinkLinearIssue")]
+    pub unlink_linear_issue: Todo,
+}
+
+#[derive(cynic::QueryVariables, Clone, Debug)]
+pub struct UnlinkLinearVars {
+    pub todo_id: i32,
+    pub issue_id: i32,
+}
+
 // ---- Client impl ----
 
 impl Client {
@@ -629,6 +764,71 @@ impl Client {
             .map(|q| q.todo_event.nodes)
     }
 
+    pub async fn todo_pull_requests(&self, todo_id: i32) -> GqlResult<Vec<TodoPullRequest>> {
+        let vars = TodoPullRequestsVars {
+            filters: Some(TodoPullRequestFilterInput {
+                todo_id: Some(IntegerFilterInput { eq: Some(todo_id) }),
+            }),
+        };
+        let operation = cynic::QueryBuilder::build(vars);
+        self.post_operation::<TodoPullRequestsQuery, _>(operation)
+            .await
+            .map(|q| q.todo_pull_request.nodes)
+    }
+
+    pub async fn todo_linear_issues(&self, todo_id: i32) -> GqlResult<Vec<TodoLinearIssue>> {
+        let vars = TodoLinearIssuesVars {
+            filters: Some(TodoLinearIssueFilterInput {
+                todo_id: Some(IntegerFilterInput { eq: Some(todo_id) }),
+            }),
+        };
+        let operation = cynic::QueryBuilder::build(vars);
+        self.post_operation::<TodoLinearIssuesQuery, _>(operation)
+            .await
+            .map(|q| q.todo_linear_issue.nodes)
+    }
+
+    pub async fn link_pull_request(
+        &self,
+        todo_id: i32,
+        pr_id: i32,
+        relation: LinkRelation,
+    ) -> GqlResult<Todo> {
+        let vars = LinkPrVars {
+            todo_id,
+            pr_id,
+            relation,
+        };
+        let operation = cynic::MutationBuilder::build(vars);
+        self.post_operation::<LinkPullRequestMut, _>(operation)
+            .await
+            .map(|m| m.link_pull_request)
+    }
+
+    pub async fn link_linear_issue(&self, todo_id: i32, issue_id: i32) -> GqlResult<Todo> {
+        let vars = LinkLinearVars { todo_id, issue_id };
+        let operation = cynic::MutationBuilder::build(vars);
+        self.post_operation::<LinkLinearIssueMut, _>(operation)
+            .await
+            .map(|m| m.link_linear_issue)
+    }
+
+    pub async fn unlink_pull_request(&self, todo_id: i32, pr_id: i32) -> GqlResult<Todo> {
+        let vars = UnlinkPrVars { todo_id, pr_id };
+        let operation = cynic::MutationBuilder::build(vars);
+        self.post_operation::<UnlinkPullRequestMut, _>(operation)
+            .await
+            .map(|m| m.unlink_pull_request)
+    }
+
+    pub async fn unlink_linear_issue(&self, todo_id: i32, issue_id: i32) -> GqlResult<Todo> {
+        let vars = UnlinkLinearVars { todo_id, issue_id };
+        let operation = cynic::MutationBuilder::build(vars);
+        self.post_operation::<UnlinkLinearIssueMut, _>(operation)
+            .await
+            .map(|m| m.unlink_linear_issue)
+    }
+
     pub async fn create_todo(&self, title: &str) -> GqlResult<Todo> {
         let vars = CreateTodoVars {
             title: title.into(),
@@ -640,11 +840,16 @@ impl Client {
             .map(|m| m.create_todo)
     }
 
-    pub async fn update_todo(&self, id: i32, title: Option<&str>) -> GqlResult<Todo> {
+    pub async fn update_todo(
+        &self,
+        id: i32,
+        title: Option<&str>,
+        desc: Option<&str>,
+    ) -> GqlResult<Todo> {
         let vars = UpdateTodoVars {
             id,
             title: title.map(Into::into),
-            desc: None,
+            desc: desc.map(Into::into),
         };
         let operation = cynic::MutationBuilder::build(vars);
         self.post_operation::<UpdateTodoMut, _>(operation)
@@ -767,5 +972,50 @@ impl Client {
         self.post_operation::<SyncLinearMut, _>(operation)
             .await
             .map(|m| m.sync_linear)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cynic validates query fragments against the SDL at build time.
+    /// This test confirms the link-related fragments build operations that
+    /// serialize without error — exercising the codegen path.
+    #[test]
+    fn link_query_fragments_build() {
+        let pr_vars = TodoPullRequestsVars {
+            filters: Some(TodoPullRequestFilterInput {
+                todo_id: Some(IntegerFilterInput { eq: Some(1) }),
+            }),
+        };
+        let _pr_op: cynic::Operation<TodoPullRequestsQuery, TodoPullRequestsVars> =
+            cynic::QueryBuilder::build(pr_vars);
+
+        let linear_vars = TodoLinearIssuesVars {
+            filters: Some(TodoLinearIssueFilterInput {
+                todo_id: Some(IntegerFilterInput { eq: Some(1) }),
+            }),
+        };
+        let _linear_op: cynic::Operation<TodoLinearIssuesQuery, TodoLinearIssuesVars> =
+            cynic::QueryBuilder::build(linear_vars);
+    }
+
+    #[test]
+    fn link_mutation_fragments_build() {
+        let pr_vars = LinkPrVars {
+            todo_id: 1,
+            pr_id: 2,
+            relation: LinkRelation::References,
+        };
+        let _pr_op: cynic::Operation<LinkPullRequestMut, LinkPrVars> =
+            cynic::MutationBuilder::build(pr_vars);
+
+        let linear_vars = LinkLinearVars {
+            todo_id: 1,
+            issue_id: 3,
+        };
+        let _linear_op: cynic::Operation<LinkLinearIssueMut, LinkLinearVars> =
+            cynic::MutationBuilder::build(linear_vars);
     }
 }

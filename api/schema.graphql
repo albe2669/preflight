@@ -473,6 +473,8 @@ type Mutation {
   dismissPullRequest(id: Int!): PullRequest!
   todoFromLinearIssue(linearIssueId: Int!, planToday: Boolean!): Todo!
   linkLinearIssue(todoId: Int!, linearIssueId: Int!): Todo!
+  unlinkPullRequest(todoId: Int!, pullRequestId: Int!): Todo!
+  unlinkLinearIssue(todoId: Int!, linearIssueId: Int!): Todo!
   syncLinear: SyncState!
   syncGithub: SyncState!
 }

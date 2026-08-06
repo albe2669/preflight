@@ -80,6 +80,12 @@ pub enum EventKind {
     #[sea_orm(string_value = "linked_linear")]
     #[serde(rename = "linked_linear")]
     LinkedLinear,
+    #[sea_orm(string_value = "unlinked_pr")]
+    #[serde(rename = "unlinked_pr")]
+    UnlinkedPr,
+    #[sea_orm(string_value = "unlinked_linear")]
+    #[serde(rename = "unlinked_linear")]
+    UnlinkedLinear,
     #[sea_orm(string_value = "planned")]
     #[serde(rename = "planned")]
     Planned,

@@ -41,6 +41,8 @@ pub trait LinkService: Send + Sync {
     async fn link_linear(&self, todo_id: i64, linear_issue_id: i64) -> Result<Todo>;
     async fn add_tag(&self, todo_id: i64, slug: &str) -> Result<Todo>;
     async fn remove_tag(&self, todo_id: i64, slug: &str) -> Result<Todo>;
+    async fn unlink_pr(&self, todo_id: i64, pr_id: i64) -> Result<Todo>;
+    async fn unlink_linear(&self, todo_id: i64, linear_issue_id: i64) -> Result<Todo>;
 }
 
 /// Concrete implementation. Private; only the constructor is pub.
@@ -480,6 +482,86 @@ impl LinkService for LinkServiceImpl {
                             )
                             .await?;
                         }
+                    }
+                    Ok(todo)
+                })
+            })
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Unlink a PR from a todo. Idempotent: no-op if no link exists.
+    async fn unlink_pr(&self, todo_id: i64, pr_id: i64) -> Result<Todo> {
+        let clock = self.clock.clone();
+        self.db
+            .transaction(|txn| {
+                Box::pin(async move {
+                    let todo: Todo = TodoEntity::find_by_id(todo_id)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| LinkError::NotFound(format!("todo {todo_id}")))?;
+
+                    let existing = TprEntity::find()
+                        .filter(todo_pull_request::Column::TodoId.eq(todo_id))
+                        .filter(todo_pull_request::Column::PullRequestId.eq(pr_id))
+                        .one(txn)
+                        .await?;
+                    if let Some(row) = existing {
+                        let _ = TprEntity::delete_by_id((row.todo_id, row.pull_request_id))
+                            .exec(txn)
+                            .await?;
+                        EventWriter::append(
+                            txn,
+                            &clock,
+                            todo_id,
+                            EventKind::UnlinkedPr,
+                            EventActor::User,
+                            Some("pull_request_id".into()),
+                            None,
+                            Some(pr_id.to_string()),
+                            None,
+                        )
+                        .await?;
+                    }
+                    Ok(todo)
+                })
+            })
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Unlink a Linear issue from a todo. Idempotent: no-op if no link exists.
+    async fn unlink_linear(&self, todo_id: i64, linear_issue_id: i64) -> Result<Todo> {
+        let clock = self.clock.clone();
+        self.db
+            .transaction(|txn| {
+                Box::pin(async move {
+                    let todo: Todo = TodoEntity::find_by_id(todo_id)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| LinkError::NotFound(format!("todo {todo_id}")))?;
+
+                    let existing = TliEntity::find()
+                        .filter(todo_linear_issue::Column::TodoId.eq(todo_id))
+                        .filter(todo_linear_issue::Column::LinearIssueId.eq(linear_issue_id))
+                        .one(txn)
+                        .await?;
+                    if let Some(row) = existing {
+                        let _ = TliEntity::delete_by_id((row.todo_id, row.linear_issue_id))
+                            .exec(txn)
+                            .await?;
+                        EventWriter::append(
+                            txn,
+                            &clock,
+                            todo_id,
+                            EventKind::UnlinkedLinear,
+                            EventActor::User,
+                            Some("linear_issue_id".into()),
+                            None,
+                            Some(linear_issue_id.to_string()),
+                            None,
+                        )
+                        .await?;
                     }
                     Ok(todo)
                 })
