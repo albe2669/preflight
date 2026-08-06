@@ -212,7 +212,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-pub async fn handle_navigate(
+pub(crate) async fn handle_navigate(
     app: &mut App,
     key: KeyCode,
     client: &gql::Client,
@@ -220,16 +220,14 @@ pub async fn handle_navigate(
 ) -> anyhow::Result<bool> {
     let plan_count = app.today_plan().len();
     match key {
-        KeyCode::Char('j') | KeyCode::Down => {
-            if app.cursor + 1 < plan_count {
+        KeyCode::Char('j') | KeyCode::Down
+            if app.cursor + 1 < plan_count => {
                 app.cursor += 1;
             }
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            if app.cursor > 0 {
+        KeyCode::Char('k') | KeyCode::Up
+            if app.cursor > 0 => {
                 app.cursor -= 1;
             }
-        }
         KeyCode::Char('a') => {
             app.mode = Mode::InlineCreate {
                 input: String::new(),

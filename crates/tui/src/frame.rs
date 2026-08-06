@@ -203,7 +203,6 @@ fn status_hints(app: &App) -> String {
             "h/l prev/next day  g pick date  enter open todo  a actor filter".into()
         }
         (View::Sync, _) => "s sync selected  S sync all  esc back".into(),
-        _ => "? keys".into(),
     }
 }
 

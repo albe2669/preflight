@@ -95,23 +95,21 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-pub async fn handle_navigate(
+pub(crate) async fn handle_navigate(
     app: &mut App,
     key: KeyCode,
     client: &gql::Client,
     tx: &mpsc::Sender<crate::AppMsg>,
 ) -> anyhow::Result<bool> {
     match key {
-        KeyCode::Char('j') | KeyCode::Down => {
-            if app.cursor + 1 < app.data.sync.len() {
+        KeyCode::Char('j') | KeyCode::Down
+            if app.cursor + 1 < app.data.sync.len() => {
                 app.cursor += 1;
             }
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            if app.cursor > 0 {
+        KeyCode::Char('k') | KeyCode::Up
+            if app.cursor > 0 => {
                 app.cursor -= 1;
             }
-        }
         KeyCode::Char('s') => {
             // Sync the selected source.
             if let Some(s) = app.data.sync.get(app.cursor) {

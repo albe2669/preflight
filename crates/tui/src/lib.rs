@@ -137,22 +137,20 @@ async fn handle_key(
     match key {
         Char('q') if app.mode == Mode::Navigate && app.view != View::Today => {}
         Char('Q') => return Ok(true),
-        Tab => {
-            if app.mode == Mode::Navigate {
+        Tab
+            if app.mode == Mode::Navigate => {
                 let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
                 app.view = View::ALL[(idx + 1) % View::ALL.len()];
                 app.cursor = 0;
                 return Ok(false);
             }
-        }
-        BackTab => {
-            if app.mode == Mode::Navigate {
+        BackTab
+            if app.mode == Mode::Navigate => {
                 let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
                 app.view = View::ALL[(idx + View::ALL.len() - 1) % View::ALL.len()];
                 app.cursor = 0;
                 return Ok(false);
             }
-        }
         Esc => {
             app.mode = Mode::Navigate;
             app.toast = None;

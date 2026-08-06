@@ -193,7 +193,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-pub async fn handle_navigate(
+pub(crate) async fn handle_navigate(
     app: &mut App,
     key: KeyCode,
     client: &gql::Client,
@@ -201,16 +201,14 @@ pub async fn handle_navigate(
 ) -> anyhow::Result<bool> {
     let total = app.inbox_prs().len() + app.inbox_linears().len();
     match key {
-        KeyCode::Char('j') | KeyCode::Down => {
-            if app.cursor + 1 < total {
+        KeyCode::Char('j') | KeyCode::Down
+            if app.cursor + 1 < total => {
                 app.cursor += 1;
             }
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            if app.cursor > 0 {
+        KeyCode::Char('k') | KeyCode::Up
+            if app.cursor > 0 => {
                 app.cursor -= 1;
             }
-        }
         KeyCode::Char('C') => {
             // Convert selected inbox row to todo, plan today.
             let prs = app.inbox_prs();

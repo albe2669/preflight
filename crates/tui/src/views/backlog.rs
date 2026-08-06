@@ -51,7 +51,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             continue;
         }
 
-        for (_i, todo) in rows.iter().enumerate() {
+        for todo in rows.iter() {
             let is_cursor = idx == app.cursor;
             let (g, c) = crate::frame::status_glyph(&todo.status);
             let title_style = match todo.status.as_str() {
@@ -95,7 +95,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-pub async fn handle_navigate(
+pub(crate) async fn handle_navigate(
     app: &mut App,
     key: KeyCode,
     client: &gql::Client,
@@ -105,11 +105,10 @@ pub async fn handle_navigate(
         KeyCode::Char('j') | KeyCode::Down => {
             app.cursor = app.cursor.saturating_add(1);
         }
-        KeyCode::Char('k') | KeyCode::Up => {
-            if app.cursor > 0 {
+        KeyCode::Char('k') | KeyCode::Up
+            if app.cursor > 0 => {
                 app.cursor -= 1;
             }
-        }
         KeyCode::Char('/') => {
             app.mode = crate::app::Mode::Search {
                 input: String::new(),

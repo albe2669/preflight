@@ -142,7 +142,7 @@ pub fn render_overlay(f: &mut Frame, app: &mut App, area: Rect) {
     );
 }
 
-pub async fn handle(
+pub(crate) async fn handle(
     app: &mut App,
     key: KeyCode,
     client: &gql::Client,

@@ -153,7 +153,7 @@ use ratatui::style::{Modifier, Style};
 
 // ---- Key handlers dispatched by lib.rs ----
 
-pub async fn handle_navigate(
+pub(crate) async fn handle_navigate(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
@@ -168,7 +168,7 @@ pub async fn handle_navigate(
     }
 }
 
-pub async fn handle_inline_create(
+pub(crate) async fn handle_inline_create(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
@@ -228,7 +228,7 @@ pub async fn handle_inline_create(
     }
 }
 
-pub async fn handle_inline_edit(
+pub(crate) async fn handle_inline_edit(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
@@ -285,7 +285,7 @@ pub async fn handle_inline_edit(
     }
 }
 
-pub fn handle_search(
+pub(crate) fn handle_search(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     _input: &str,
@@ -307,7 +307,7 @@ pub fn handle_search(
     Ok(false)
 }
 
-pub async fn handle_reorder(
+pub(crate) async fn handle_reorder(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
@@ -369,7 +369,7 @@ pub async fn handle_reorder(
     Ok(false)
 }
 
-pub async fn handle_confirm(
+pub(crate) async fn handle_confirm(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,
@@ -443,7 +443,7 @@ pub async fn handle_confirm(
     Ok(false)
 }
 
-pub async fn handle_detail(
+pub(crate) async fn handle_detail(
     app: &mut App,
     key: ratatui::crossterm::event::KeyCode,
     client: &gql::Client,

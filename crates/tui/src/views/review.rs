@@ -106,7 +106,7 @@ fn list_panel<'a>(title: &str, todos: &[gql::Todo], _is_touched: bool) -> List<'
     List::new(items).style(Style::default().bg(Palette::BG).fg(Palette::TEXT))
 }
 
-pub async fn handle_navigate(
+pub(crate) async fn handle_navigate(
     app: &mut App,
     key: KeyCode,
     client: &gql::Client,
@@ -114,11 +114,11 @@ pub async fn handle_navigate(
 ) -> anyhow::Result<bool> {
     match key {
         KeyCode::Char('h') | KeyCode::Left => {
-            app.review_date = app.review_date - chrono::Duration::days(1);
+            app.review_date -= chrono::Duration::days(1);
             fetch_review(app, client, tx).await;
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            app.review_date = app.review_date + chrono::Duration::days(1);
+            app.review_date += chrono::Duration::days(1);
             fetch_review(app, client, tx).await;
         }
         KeyCode::Char('g') => {
