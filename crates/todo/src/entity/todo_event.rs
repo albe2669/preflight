@@ -1,0 +1,47 @@
+use crate::entity::enums::{EventActor, EventKind};
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+#[sea_orm(table_name = "todo_event")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: i64,
+    pub todo_id: i64,
+    pub kind: EventKind,
+    pub field: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub old_value: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub new_value: Option<String>,
+    pub payload: Option<Json>,
+    pub actor: EventActor,
+    pub occurred_at: DateTimeWithTimeZone,
+    pub logical_date: Date,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::todo::Entity",
+        from = "Column::TodoId",
+        to = "super::todo::Column::Id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    Todo,
+}
+
+impl Related<super::todo::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Todo.def()
+    }
+}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelatedEntity)]
+pub enum RelatedEntity {
+    #[sea_orm(entity = "super::todo::Entity")]
+    Todo,
+}

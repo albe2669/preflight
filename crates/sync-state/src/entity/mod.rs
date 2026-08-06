@@ -1,1 +1,3 @@
-// sync_state entity — will be populated from crates/entity/src/sync_state.rs
+pub mod sync_state;
+
+seaography::register_entity_modules!([sync_state]);

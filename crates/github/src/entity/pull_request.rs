@@ -1,0 +1,38 @@
+use crate::entity::enums::PullRequestState;
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+#[sea_orm(table_name = "pull_request")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: i64,
+    #[sea_orm(unique_key = "ux_pull_request_identity")]
+    pub provider: String,
+    #[sea_orm(unique_key = "ux_pull_request_identity")]
+    pub owner: String,
+    #[sea_orm(unique_key = "ux_pull_request_identity")]
+    pub repo: String,
+    #[sea_orm(unique_key = "ux_pull_request_identity")]
+    pub number: i64,
+    #[sea_orm(column_type = "Text")]
+    pub title: String,
+    #[sea_orm(column_type = "Text")]
+    pub url: String,
+    pub author: Option<String>,
+    pub state: PullRequestState,
+    pub review_requested: bool,
+    pub authored_by_me: bool,
+    pub remote_created_at: Option<DateTimeWithTimeZone>,
+    pub remote_updated_at: Option<DateTimeWithTimeZone>,
+    pub synced_at: DateTimeWithTimeZone,
+    pub dismissed_at: Option<DateTimeWithTimeZone>,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelatedEntity)]
+pub enum RelatedEntity {}

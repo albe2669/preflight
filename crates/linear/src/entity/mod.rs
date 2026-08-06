@@ -1,1 +1,3 @@
-// linear domain entities — will be populated
+pub mod linear_issue;
+
+seaography::register_entity_modules!([linear_issue]);
