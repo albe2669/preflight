@@ -7,6 +7,11 @@ members = [
     "crates/sync",
     "crates/graphql",
     "crates/server",
+    "crates/todo",
+    "crates/github",
+    "crates/linear",
+    "crates/links",
+    "crates/sync-state",
 ]
 
 [workspace.package]
@@ -22,6 +27,11 @@ migration = { path = "crates/migration" }
 preflight-core = { path = "crates/core" }
 sync = { path = "crates/sync" }
 graphql = { path = "crates/graphql" }
+todo = { path = "crates/todo" }
+github = { path = "crates/github" }
+linear = { path = "crates/linear" }
+links = { path = "crates/links" }
+sync-state = { path = "crates/sync-state" }
 
 seaography = { version = "~2.0.0-rc.9", features = [
     "graphql-playground",
