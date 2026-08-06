@@ -91,11 +91,11 @@ impl AppData {
     /// Convert from the cynic `FetchAll` query result.
     pub fn from_fetch_all(f: crate::gql::FetchAll) -> Self {
         Self {
-            todos: f.todo.nodes,
-            plan: f.todo_day_plan.nodes,
-            pulls: f.pull_request.nodes,
-            linears: f.linear_issue.nodes,
-            sync: f.sync_state.nodes,
+            todos: f.todo,
+            plan: f.plan,
+            pulls: f.pulls,
+            linears: f.linears,
+            sync: f.sync,
         }
     }
 }

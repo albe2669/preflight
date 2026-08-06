@@ -42,10 +42,15 @@ pub struct Todo {
     pub title: String,
     pub description: Option<String>,
     pub status: String,
+    #[cynic(rename = "blockedReason")]
     pub blocked_reason: Option<String>,
+    #[cynic(rename = "sortKey")]
     pub sort_key: i32,
+    #[cynic(rename = "createdAt")]
     pub created_at: String,
+    #[cynic(rename = "startedAt")]
     pub started_at: Option<String>,
+    #[cynic(rename = "closedAt")]
     pub closed_at: Option<String>,
 }
 
@@ -54,7 +59,9 @@ pub struct Todo {
 pub struct PlanRow {
     pub id: i32,
     pub position: i32,
+    #[cynic(rename = "carriedOver")]
     pub carried_over: bool,
+    #[cynic(rename = "removedAt")]
     pub removed_at: Option<String>,
     pub todo: Option<Todo>,
 }
@@ -70,8 +77,11 @@ pub struct PullRequest {
     pub url: String,
     pub author: Option<String>,
     pub state: String,
+    #[cynic(rename = "reviewRequested")]
     pub review_requested: bool,
+    #[cynic(rename = "authoredByMe")]
     pub authored_by_me: bool,
+    #[cynic(rename = "dismissedAt")]
     pub dismissed_at: Option<String>,
 }
 
@@ -82,12 +92,18 @@ pub struct LinearIssue {
     pub identifier: String,
     pub title: String,
     pub url: String,
+    #[cynic(rename = "stateName")]
     pub state_name: String,
+    #[cynic(rename = "stateType")]
     pub state_type: String,
     pub priority: Option<i32>,
+    #[cynic(rename = "teamKey")]
     pub team_key: Option<String>,
+    #[cynic(rename = "assigneeName")]
     pub assignee_name: Option<String>,
+    #[cynic(rename = "assignedToMe")]
     pub assigned_to_me: bool,
+    #[cynic(rename = "dismissedAt")]
     pub dismissed_at: Option<String>,
 }
 
@@ -96,8 +112,11 @@ pub struct LinearIssue {
 pub struct SyncState {
     pub source: String,
     pub cursor: Option<String>,
+    #[cynic(rename = "lastSyncedAt")]
     pub last_synced_at: Option<String>,
+    #[cynic(rename = "lastStatus")]
     pub last_status: String,
+    #[cynic(rename = "lastError")]
     pub last_error: Option<String>,
 }
 
@@ -110,6 +129,7 @@ pub struct TodoEvent {
     pub old_value: Option<String>,
     pub new_value: Option<String>,
     pub actor: String,
+    #[cynic(rename = "occurredAt")]
     pub occurred_at: String,
 }
 
@@ -163,38 +183,72 @@ pub struct DailyReview {
     pub planned: Vec<Todo>,
     pub touched: Vec<Todo>,
     pub completed: Vec<Todo>,
+    #[cynic(rename = "carriedOver")]
     pub carried_over: Vec<Todo>,
 }
 
 // ---- Query root fragments ----
 
+// ---- Query root fragments (one root field each — the server doesn't
+// support multiple root Query fields in a single operation) ----
+
 #[derive(cynic::QueryFragment, Clone, Debug)]
-#[cynic(graphql_type = "Query", variables = "FetchAllVars")]
-pub struct FetchAll {
-    #[arguments(filters: $filters)]
+#[cynic(graphql_type = "Query")]
+pub struct TodosQuery {
     pub todo: TodoConnection,
-    #[arguments(filters: $plan_filters, orderBy: $plan_order)]
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Query", variables = "PlanQueryVars")]
+pub struct PlanQuery {
+    #[arguments(filters: $filters, orderBy: $order)]
+    #[cynic(rename = "todoDayPlan")]
     pub todo_day_plan: TodoDayPlanConnection,
-    #[arguments(filters: $pr_filters)]
-    pub pull_request: PullRequestConnection,
-    #[arguments(filters: $linear_filters)]
-    pub linear_issue: LinearIssueConnection,
-    pub sync_state: SyncStateConnection,
 }
 
 #[derive(cynic::QueryVariables, Clone, Debug)]
-pub struct FetchAllVars {
-    pub filters: Option<TodoFilterInput>,
-    pub plan_filters: Option<TodoDayPlanFilterInput>,
-    pub plan_order: Option<TodoDayPlanOrderInput>,
-    pub pr_filters: Option<PullRequestFilterInput>,
-    pub linear_filters: Option<LinearIssueFilterInput>,
+pub struct PlanQueryVars {
+    pub filters: Option<TodoDayPlanFilterInput>,
+    pub order: Option<TodoDayPlanOrderInput>,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Query")]
+pub struct PullsQuery {
+    #[cynic(rename = "pullRequest")]
+    pub pull_request: PullRequestConnection,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Query")]
+pub struct LinearsQuery {
+    #[cynic(rename = "linearIssue")]
+    pub linear_issue: LinearIssueConnection,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Query")]
+pub struct SyncQuery {
+    #[cynic(rename = "syncState")]
+    pub sync_state: SyncStateConnection,
+}
+
+/// Flattened data from all queries. `fetch_all` fires them concurrently and
+/// assembles this.
+#[derive(Clone, Debug, Default)]
+pub struct FetchAll {
+    pub todo: Vec<Todo>,
+    pub plan: Vec<PlanRow>,
+    pub pulls: Vec<PullRequest>,
+    pub linears: Vec<LinearIssue>,
+    pub sync: Vec<SyncState>,
 }
 
 #[derive(cynic::QueryFragment, Clone, Debug)]
 #[cynic(graphql_type = "Query", variables = "DailyReviewVars")]
 pub struct DailyReviewQuery {
     #[arguments(date: $date)]
+    #[cynic(rename = "dailyReview")]
     pub daily_review: DailyReview,
 }
 
@@ -207,6 +261,7 @@ pub struct DailyReviewVars {
 #[cynic(graphql_type = "Query", variables = "TodoEventsVars")]
 pub struct TodoEventsQuery {
     #[arguments(filters: $filters, orderBy: $order)]
+    #[cynic(rename = "todoEvent")]
     pub todo_event: TodoEventConnection,
 }
 
@@ -287,6 +342,7 @@ pub enum OrderBy {
 #[cynic(graphql_type = "Mutation", variables = "CreateTodoVars")]
 pub struct CreateTodoMut {
     #[arguments(title: $title, description: $desc)]
+    #[cynic(rename = "createTodo")]
     pub create_todo: Todo,
 }
 
@@ -300,6 +356,7 @@ pub struct CreateTodoVars {
 #[cynic(graphql_type = "Mutation", variables = "UpdateTodoVars")]
 pub struct UpdateTodoMut {
     #[arguments(id: $id, title: $title, description: $desc)]
+    #[cynic(rename = "updateTodo")]
     pub update_todo: Todo,
 }
 
@@ -314,6 +371,7 @@ pub struct UpdateTodoVars {
 #[cynic(graphql_type = "Mutation", variables = "SetStatusVars")]
 pub struct SetStatusMut {
     #[arguments(id: $id, status: $status, blockedReason: $blocked)]
+    #[cynic(rename = "setTodoStatus")]
     pub set_todo_status: Todo,
 }
 
@@ -342,6 +400,7 @@ pub struct SetStatusVars {
 #[cynic(graphql_type = "Mutation", variables = "PlanTodayVars")]
 pub struct PlanTodayMut {
     #[arguments(todoId: $todo_id)]
+    #[cynic(rename = "planForToday")]
     pub plan_for_today: TodoDayPlanId,
 }
 
@@ -360,6 +419,7 @@ pub struct PlanTodayVars {
 #[cynic(graphql_type = "Mutation", variables = "UnplanVars")]
 pub struct UnplanMut {
     #[arguments(todoId: $todo_id)]
+    #[cynic(rename = "unplanForToday")]
     pub unplan_for_today: bool,
 }
 
@@ -372,6 +432,7 @@ pub struct UnplanVars {
 #[cynic(graphql_type = "Mutation", variables = "ReorderVars")]
 pub struct ReorderMut {
     #[arguments(date: $date, todoIds: $todo_ids)]
+    #[cynic(rename = "reorderDayPlan")]
     pub reorder_day_plan: Vec<TodoDayPlanId>,
 }
 
@@ -385,6 +446,7 @@ pub struct ReorderVars {
 #[cynic(graphql_type = "Mutation", variables = "CarryOverVars")]
 pub struct CarryOverMut {
     #[arguments(from: $from, to: $to)]
+    #[cynic(rename = "carryOverUnfinished")]
     pub carry_over_unfinished: Vec<TodoDayPlanId>,
 }
 
@@ -398,6 +460,7 @@ pub struct CarryOverVars {
 #[cynic(graphql_type = "Mutation", variables = "TagVars")]
 pub struct AddTagMut {
     #[arguments(todoId: $todo_id, slug: $slug)]
+    #[cynic(rename = "addTag")]
     pub add_tag: Todo,
 }
 
@@ -411,6 +474,7 @@ pub struct TagVars {
 #[cynic(graphql_type = "Mutation", variables = "TagVars")]
 pub struct RemoveTagMut {
     #[arguments(todoId: $todo_id, slug: $slug)]
+    #[cynic(rename = "removeTag")]
     pub remove_tag: Todo,
 }
 
@@ -418,6 +482,7 @@ pub struct RemoveTagMut {
 #[cynic(graphql_type = "Mutation", variables = "TodoFromPrVars")]
 pub struct TodoFromPrMut {
     #[arguments(pullRequestId: $pr_id, planToday: $plan_today)]
+    #[cynic(rename = "todoFromPullRequest")]
     pub todo_from_pull_request: Todo,
 }
 
@@ -431,6 +496,7 @@ pub struct TodoFromPrVars {
 #[cynic(graphql_type = "Mutation", variables = "DismissPrVars")]
 pub struct DismissPrMut {
     #[arguments(id: $id)]
+    #[cynic(rename = "dismissPullRequest")]
     pub dismiss_pull_request: PullRequest,
 }
 
@@ -443,6 +509,7 @@ pub struct DismissPrVars {
 #[cynic(graphql_type = "Mutation", variables = "TodoFromLinearVars")]
 pub struct TodoFromLinearMut {
     #[arguments(linearIssueId: $issue_id, planToday: $plan_today)]
+    #[cynic(rename = "todoFromLinearIssue")]
     pub todo_from_linear_issue: Todo,
 }
 
@@ -455,12 +522,14 @@ pub struct TodoFromLinearVars {
 #[derive(cynic::QueryFragment, Clone, Debug)]
 #[cynic(graphql_type = "Mutation")]
 pub struct SyncGithubMut {
+    #[cynic(rename = "syncGithub")]
     pub sync_github: SyncState,
 }
 
 #[derive(cynic::QueryFragment, Clone, Debug)]
 #[cynic(graphql_type = "Mutation")]
 pub struct SyncLinearMut {
+    #[cynic(rename = "syncLinear")]
     pub sync_linear: SyncState,
 }
 
@@ -495,21 +564,40 @@ impl Client {
     }
 
     pub async fn fetch_all(&self, date: &str) -> GqlResult<FetchAll> {
-        let vars = FetchAllVars {
-            filters: None,
-            plan_filters: Some(TodoDayPlanFilterInput {
-                plan_date: Some(TextFilterInput {
-                    eq: Some(date.into()),
-                }),
+        let plan_filters = TodoDayPlanFilterInput {
+            plan_date: Some(TextFilterInput {
+                eq: Some(date.into()),
             }),
-            plan_order: Some(TodoDayPlanOrderInput {
-                position: Some(OrderBy::Asc),
-            }),
-            pr_filters: None,
-            linear_filters: None,
         };
-        let operation = cynic::QueryBuilder::build(vars);
-        self.post_operation(operation).await
+        let plan_order = TodoDayPlanOrderInput {
+            position: Some(OrderBy::Asc),
+        };
+        let plan_vars = PlanQueryVars {
+            filters: Some(plan_filters),
+            order: Some(plan_order),
+        };
+
+        let todos_op = cynic::QueryBuilder::build(());
+        let plan_op = cynic::QueryBuilder::build(plan_vars);
+        let pulls_op = cynic::QueryBuilder::build(());
+        let linears_op = cynic::QueryBuilder::build(());
+        let sync_op = cynic::QueryBuilder::build(());
+
+        let (todos, plan, pulls, linears, sync) = tokio::try_join!(
+            self.post_operation::<TodosQuery, _>(todos_op),
+            self.post_operation::<PlanQuery, _>(plan_op),
+            self.post_operation::<PullsQuery, _>(pulls_op),
+            self.post_operation::<LinearsQuery, _>(linears_op),
+            self.post_operation::<SyncQuery, _>(sync_op),
+        )?;
+
+        Ok(FetchAll {
+            todo: todos.todo.nodes,
+            plan: plan.todo_day_plan.nodes,
+            pulls: pulls.pull_request.nodes,
+            linears: linears.linear_issue.nodes,
+            sync: sync.sync_state.nodes,
+        })
     }
 
     pub async fn daily_review(&self, date: &str) -> GqlResult<DailyReview> {
