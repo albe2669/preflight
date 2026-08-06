@@ -241,3 +241,163 @@ fn fetch_detail(_app: &mut App, client: &gql::Client, tx: &mpsc::Sender<crate::A
         }
     });
 }
+#[cfg(test)]
+mod render_tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use crate::app::tests::{make_plan_row, make_todo};
+    use crate::app::{App, Mode};
+    use crate::test_support::buffer_text;
+    use crate::theme::Glyph;
+
+    fn render_today(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                crate::views::today::render(f, app, area);
+            })
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_today_renders_plan_rows_with_headers() {
+        let mut app = App::default();
+        app.data.plan = vec![
+            make_plan_row(1, 0, make_todo(1, "Task A", "todo"), None),
+            make_plan_row(2, 1, make_todo(2, "Task B", "started"), None),
+        ];
+        app.data.todos = vec![
+            make_todo(1, "Task A", "todo"),
+            make_todo(2, "Task B", "started"),
+        ];
+
+        let buf = render_today(&mut app);
+
+        // Both titles appear in the rendered output.
+        assert!(
+            buf.contains("Task A"),
+            "expected 'Task A' in buffer:\n{buf}"
+        );
+        assert!(
+            buf.contains("Task B"),
+            "expected 'Task B' in buffer:\n{buf}"
+        );
+
+        // Group headers render with count.
+        assert!(
+            buf.contains("STARTED · 1"),
+            "expected 'STARTED · 1' header:\n{buf}"
+        );
+        assert!(
+            buf.contains("TODO · 1"),
+            "expected 'TODO · 1' header:\n{buf}"
+        );
+
+        // Status glyphs: ○ for todo, ◐ for started.
+        assert!(
+            buf.contains(Glyph::STATUS_TODO),
+            "expected todo glyph '○' in buffer:\n{buf}"
+        );
+        assert!(
+            buf.contains(Glyph::STATUS_STARTED),
+            "expected started glyph '◐' in buffer:\n{buf}"
+        );
+    }
+
+    #[test]
+    fn test_today_renders_carried_over_glyph() {
+        let mut app = App::default();
+        let mut row = make_plan_row(1, 0, make_todo(1, "Carried task", "todo"), None);
+        row.carried_over = true;
+        app.data.plan = vec![row];
+        app.data.todos = vec![make_todo(1, "Carried task", "todo")];
+
+        let buf = render_today(&mut app);
+
+        assert!(
+            buf.contains(Glyph::CARRIED),
+            "expected carried-over glyph '↻' in buffer:\n{buf}"
+        );
+        assert!(
+            buf.contains("Carried task"),
+            "expected 'Carried task' in buffer:\n{buf}"
+        );
+    }
+
+    #[test]
+    fn test_today_renders_unplanned_section() {
+        let mut app = App::default();
+        // A plan row with removed_at set is "unplanned" — it was intended for
+        // today but removed from the active plan.
+        app.data.plan = vec![make_plan_row(
+            1,
+            0,
+            make_todo(1, "Dropped task", "todo"),
+            Some("2026-08-05"),
+        )];
+        app.data.todos = vec![make_todo(1, "Dropped task", "todo")];
+
+        let buf = render_today(&mut app);
+
+        assert!(
+            buf.contains("UNPLANNED TODAY"),
+            "expected 'UNPLANNED TODAY' section header:\n{buf}"
+        );
+        assert!(
+            buf.contains("Dropped task"),
+            "expected 'Dropped task' title in unplanned section:\n{buf}"
+        );
+    }
+
+    #[test]
+    fn test_today_renders_inline_create_prompt_in_navigate_mode() {
+        let mut app = App {
+            mode: Mode::Navigate,
+            ..Default::default()
+        };
+        // Empty plan — no active rows.
+
+        let buf = render_today(&mut app);
+
+        assert!(
+            buf.contains("add"),
+            "expected 'add' in inline create prompt:\n{buf}"
+        );
+        assert!(
+            buf.contains("what else is happening today?"),
+            "expected inline create placeholder text:\n{buf}"
+        );
+    }
+
+    #[test]
+    fn test_today_cursor_at_index_1_highlights_second_row() {
+        let mut app = App {
+            cursor: 1,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "First", "todo"), None),
+                    make_plan_row(2, 1, make_todo(2, "Second", "todo"), None),
+                    make_plan_row(3, 2, make_todo(3, "Third", "todo"), None),
+                ],
+                todos: vec![
+                    make_todo(1, "First", "todo"),
+                    make_todo(2, "Second", "todo"),
+                    make_todo(3, "Third", "todo"),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let buf = render_today(&mut app);
+
+        // The cursor glyph should appear in the rendered output.
+        assert!(
+            buf.contains(Glyph::CURSOR),
+            "expected cursor glyph '▌' in buffer:\n{buf}"
+        );
+    }
+}
