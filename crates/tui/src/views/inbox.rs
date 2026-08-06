@@ -316,3 +316,84 @@ pub(crate) async fn handle_navigate(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+mod render_tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use crate::app::App;
+    use crate::app::tests::{make_linear, make_pr};
+    use crate::test_support::buffer_text;
+
+    fn render_inbox(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                crate::views::inbox::render(f, app, area);
+            })
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn test_inbox_renders_pr_and_linear_groups() {
+        let mut app = App::default();
+        app.data.pulls = vec![make_pr(1, None), make_pr(2, None)];
+        app.data.linears = vec![make_linear(3, None)];
+        app.show_dismissed = false;
+
+        let buffer = render_inbox(&mut app);
+
+        assert!(buffer.contains("GITHUB"), "expected GITHUB group header");
+        assert!(
+            buffer.contains("2 pull requests"),
+            "expected PR count in header"
+        );
+        assert!(buffer.contains("LINEAR"), "expected LINEAR group header");
+        assert!(
+            buffer.contains("1 issues"),
+            "expected Linear count in header"
+        );
+        assert!(buffer.contains("PR #1"), "expected PR #1 title");
+        assert!(buffer.contains("PR #2"), "expected PR #2 title");
+        assert!(
+            buffer.contains("Issue #3"),
+            "expected Linear Issue #3 title"
+        );
+    }
+
+    #[test]
+    fn test_inbox_hides_dismissed_when_show_dismissed_false() {
+        let mut app = App::default();
+        app.data.pulls = vec![
+            make_pr(1, None),               // non-dismissed
+            make_pr(2, Some("2026-08-05")), // dismissed
+        ];
+        app.show_dismissed = false;
+
+        let buffer = render_inbox(&mut app);
+        assert!(
+            buffer.contains("PR #1"),
+            "non-dismissed PR title should appear"
+        );
+        assert!(
+            !buffer.contains("PR #2"),
+            "dismissed PR title should NOT appear when show_dismissed is false"
+        );
+
+        // Enable show_dismissed and re-render
+        app.show_dismissed = true;
+        let buffer = render_inbox(&mut app);
+        assert!(
+            buffer.contains("PR #1"),
+            "non-dismissed PR should still appear"
+        );
+        assert!(
+            buffer.contains("PR #2"),
+            "dismissed PR should appear when show_dismissed is true"
+        );
+    }
+}
