@@ -26,26 +26,40 @@ pub enum GithubError {
     SchemaMismatch(String),
 }
 
+impl From<remote_sync::error::RemoteError<GithubError>> for GithubError {
+    fn from(e: remote_sync::error::RemoteError<GithubError>) -> Self {
+        match e {
+            remote_sync::error::RemoteError::RateLimited { retry_after } => {
+                GithubError::RateLimited { retry_after }
+            }
+            remote_sync::error::RemoteError::Unauthorized => GithubError::Unauthorized,
+            remote_sync::error::RemoteError::Remote(msg) => GithubError::Remote(msg),
+            remote_sync::error::RemoteError::PaginationCursorInvalid => {
+                GithubError::PaginationCursorInvalid
+            }
+            remote_sync::error::RemoteError::PartialResults => GithubError::PartialResults,
+            remote_sync::error::RemoteError::ContentFiltered => GithubError::ContentFiltered,
+            remote_sync::error::RemoteError::SchemaMismatch(msg) => {
+                GithubError::SchemaMismatch(msg)
+            }
+            remote_sync::error::RemoteError::Provider(e) => e,
+        }
+    }
+}
+
 /// Map an HTTP status code and optional GraphQL errors to a `GithubError`.
 ///
 /// When `status` is 2xx and `graphql_errors` is empty, the caller should
-/// proceed with parsing the response — this function returns `None`.
+/// proceed with parsing the response — this function returns `Ok(())`.
+/// Delegates to the shared [`remote_sync::error::map_response_error`] and
+/// translates the sentinel onto [`GithubError`].
 pub(crate) fn map_response_error(
     status: u16,
     retry_after: Option<Duration>,
     graphql_errors: Vec<String>,
-) -> Option<GithubError> {
-    // GraphQL errors take priority (they indicate a response body error)
-    if !graphql_errors.is_empty() {
-        return Some(GithubError::Remote(graphql_errors.join("; ")));
-    }
-
-    match status {
-        401 => Some(GithubError::Unauthorized),
-        429 => Some(GithubError::RateLimited { retry_after }),
-        s if s >= 500 => Some(GithubError::Remote(format!("http {s}"))),
-        _ => None,
-    }
+) -> std::result::Result<(), GithubError> {
+    remote_sync::error::map_response_error(status, retry_after, &graphql_errors)
+        .map_err(GithubError::from)
 }
 
 #[cfg(test)]
@@ -84,14 +98,14 @@ mod tests {
     #[test]
     fn test_map_response_error_401_returns_unauthorized() {
         let err = map_response_error(401, None, vec![]);
-        assert!(matches!(err, Some(GithubError::Unauthorized)));
+        assert!(matches!(err, Err(GithubError::Unauthorized)));
     }
 
     #[test]
     fn test_map_response_error_429_with_retry_after() {
         let err = map_response_error(429, Some(Duration::from_secs(30)), vec![]);
-        assert!(matches!(err, Some(GithubError::RateLimited { .. })));
-        if let Some(GithubError::RateLimited { retry_after }) = err {
+        assert!(matches!(err, Err(GithubError::RateLimited { .. })));
+        if let Err(GithubError::RateLimited { retry_after }) = err {
             assert_eq!(retry_after, Some(Duration::from_secs(30)));
         }
     }
@@ -99,8 +113,8 @@ mod tests {
     #[test]
     fn test_map_response_error_429_without_retry_after() {
         let err = map_response_error(429, None, vec![]);
-        assert!(matches!(err, Some(GithubError::RateLimited { .. })));
-        if let Some(GithubError::RateLimited { retry_after }) = err {
+        assert!(matches!(err, Err(GithubError::RateLimited { .. })));
+        if let Err(GithubError::RateLimited { retry_after }) = err {
             assert_eq!(retry_after, None);
         }
     }
@@ -108,18 +122,18 @@ mod tests {
     #[test]
     fn test_map_response_error_5xx_returns_remote() {
         let err = map_response_error(500, None, vec![]);
-        assert!(matches!(err, Some(GithubError::Remote(_))));
+        assert!(matches!(err, Err(GithubError::Remote(_))));
     }
 
     #[test]
     fn test_map_response_error_graphql_errors_returns_remote() {
         let err = map_response_error(200, None, vec!["field not found".into()]);
-        assert!(matches!(err, Some(GithubError::Remote(_))));
+        assert!(matches!(err, Err(GithubError::Remote(_))));
     }
 
     #[test]
-    fn test_map_response_error_ok_no_errors_returns_none() {
+    fn test_map_response_error_ok_no_errors_returns_ok() {
         let err = map_response_error(200, None, vec![]);
-        assert!(err.is_none());
+        assert!(matches!(err, Ok(())));
     }
 }

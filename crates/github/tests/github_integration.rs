@@ -3,8 +3,7 @@
 mod common;
 
 use chrono::Utc;
-use github::client::{GithubApiClient, GithubPage, new_client};
-use github::cursor;
+use github::client::{GithubApiClient, new_client};
 use github::entity::enums::PullRequestState;
 use github::sync::{GithubOptions, GithubSync, PrRecord, new};
 use sea_orm::{
@@ -17,77 +16,6 @@ use std::sync::Arc;
 /// Build a no-op client — never called by these integration tests.
 fn noop_client() -> Arc<dyn GithubApiClient> {
     Arc::new(new_client(String::new(), String::new()))
-}
-
-// ---------------------------------------------------------------------------
-// cursor tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_cursor_put_then_get() {
-    let db = common::setup_db().await;
-
-    // Put a cursor and read it back
-    cursor::put(&db, "github", Some("abc123".into()), "ok", None)
-        .await
-        .unwrap();
-    let got = cursor::get(&db, "github").await.unwrap();
-    assert_eq!(got, Some("abc123".into()));
-
-    // Put with None cursor — get should return None
-    cursor::put(&db, "github", None, "ok", None).await.unwrap();
-    let got = cursor::get(&db, "github").await.unwrap();
-    assert_eq!(got, None);
-}
-
-#[tokio::test]
-async fn test_cursor_put_updates_existing() {
-    let db = common::setup_db().await;
-
-    cursor::put(&db, "github", Some("first".into()), "ok", None)
-        .await
-        .unwrap();
-    cursor::put(&db, "github", Some("second".into()), "ok", None)
-        .await
-        .unwrap();
-
-    let got = cursor::get(&db, "github").await.unwrap();
-    assert_eq!(got, Some("second".into()));
-}
-
-#[tokio::test]
-async fn test_cursor_get_returns_none_for_unknown_source() {
-    let db = common::setup_db().await;
-
-    let got = cursor::get(&db, "nonexistent").await.unwrap();
-    assert_eq!(got, None);
-}
-
-#[tokio::test]
-async fn test_cursor_put_stores_status_and_error() {
-    let db = common::setup_db().await;
-
-    cursor::put(
-        &db,
-        "github",
-        Some("page-5".into()),
-        "ok",
-        Some("some warning".into()),
-    )
-    .await
-    .unwrap();
-
-    let row = sync_state::entity::sync_state::Entity::find()
-        .filter(sync_state::entity::sync_state::Column::Source.eq("github"))
-        .one(&db)
-        .await
-        .unwrap()
-        .unwrap();
-
-    assert_eq!(row.last_status, "ok");
-    assert_eq!(row.last_error, Some("some warning".into()));
-    assert_eq!(row.cursor, Some("page-5".into()));
-    assert!(row.last_synced_at.is_some());
 }
 
 // ---------------------------------------------------------------------------

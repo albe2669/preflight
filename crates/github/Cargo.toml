@@ -10,6 +10,7 @@ name = "github"
 path = "src/lib.rs"
 
 [dependencies]
+remote-sync.workspace = true
 sync-state.workspace = true
 sea-orm.workspace = true
 seaography.workspace = true

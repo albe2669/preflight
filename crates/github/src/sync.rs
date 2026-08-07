@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::client::{GithubApiClient, fetched_to_record};
+use crate::client::{GithubApiClient, GithubClientAdapter, fetched_to_record};
 use crate::entity::enums::PullRequestState;
 use crate::entity::pull_request;
 use crate::filters::{apply_draft_policy, compile_github_query};
@@ -16,6 +16,7 @@ use sync_state::entity::sync_state;
 
 use crate::cursor;
 use crate::error::{GithubError, Result};
+use remote_sync::sync::SyncLoop;
 
 #[async_trait]
 pub trait GithubSync: Send + Sync {
@@ -32,10 +33,11 @@ pub struct GithubOptions {
 
 pub use crate::filters::GithubFilter;
 
-/// Concrete implementation — private outside the crate.
+/// Concrete implementation — private outside the crate. The client is
+/// carried as a cloneable adapter so the shared [`SyncLoop`] can drive it.
 pub(crate) struct GithubSyncImpl {
     db: DatabaseConnection,
-    client: Arc<dyn GithubApiClient>,
+    client: GithubClientAdapter,
     opts: GithubOptions,
 }
 
@@ -45,7 +47,11 @@ pub fn new(
     client: Arc<dyn GithubApiClient>,
     opts: GithubOptions,
 ) -> impl GithubSync {
-    GithubSyncImpl { db, client, opts }
+    GithubSyncImpl {
+        db,
+        client: GithubClientAdapter(client),
+        opts,
+    }
 }
 
 #[async_trait]
@@ -86,41 +92,35 @@ impl GithubSync for GithubSyncImpl {
         // RateLimited, Remote, SchemaMismatch). A mid-page failure (after
         // at least one page succeeded) returns PartialResults — the
         // buffered batch is discarded without committing.
-        let mut all_prs: Vec<crate::filters::FetchedPr> = Vec::new();
-        let mut after: Option<String> = None;
-        let mut pages_fetched = 0u32;
-        loop {
-            let page = match self.client.search_page(&query, after.as_deref()).await {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::error!(error = %e, "github page fetch failed");
-                    cursor::put(&db, "github", None, "error", Some(e.to_string())).await?;
-                    return if pages_fetched > 0 {
-                        Err(GithubError::PartialResults)
-                    } else {
-                        Err(e)
-                    };
+        let result = SyncLoop::new(self.client.clone()).run(&query).await;
+        match result {
+            Ok(sync_result) => {
+                // Post-fetch filters
+                let filtered = apply_draft_policy(
+                    sync_result.items,
+                    self.opts.exclude_drafts_unless_authored_by_me,
+                );
+
+                // Upsert each PR
+                for fetched in &filtered {
+                    let rec = fetched_to_record(fetched);
+                    upsert_pr(&db, &rec).await?;
                 }
-            };
-            pages_fetched += 1;
-            all_prs.extend(page.prs);
-            if page.has_next_page {
-                after = page.end_cursor;
-            } else {
-                break;
+
+                cursor::put(&db, "github", sync_result.end_cursor, "ok", None).await?;
+            }
+            Err(remote_err) => {
+                let err: GithubError = remote_err.into();
+                tracing::error!(error = %err, "github page fetch failed");
+                cursor::put(&db, "github", None, "error", Some(err.to_string())).await?;
+                return if let GithubError::PartialResults = err {
+                    Err(GithubError::PartialResults)
+                } else {
+                    Err(err)
+                };
             }
         }
 
-        // Post-fetch filters
-        let filtered = apply_draft_policy(all_prs, self.opts.exclude_drafts_unless_authored_by_me);
-
-        // Upsert each PR
-        for fetched in &filtered {
-            let rec = fetched_to_record(fetched);
-            upsert_pr(&db, &rec).await?;
-        }
-
-        cursor::put(&db, "github", after, "ok", None).await?;
         sync_state::Entity::find_by_id("github")
             .one(&db)
             .await?

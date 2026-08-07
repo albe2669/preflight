@@ -1,7 +1,11 @@
 //! GitHub GraphQL API client abstraction and response parsing.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use remote_sync::page::Page;
+use remote_sync::sync::RemoteApiClient;
 use serde_json::Value;
 
 use crate::entity::enums::PullRequestState;
@@ -236,7 +240,7 @@ impl GithubApiClient for GithubApiClientImpl {
             .map_err(|e| GithubError::Remote(e.to_string()))?;
 
         // Check for HTTP-level errors first
-        if let Some(err) = map_response_error(
+        map_response_error(
             status,
             headers
                 .get("Retry-After")
@@ -244,14 +248,12 @@ impl GithubApiClient for GithubApiClientImpl {
                 .and_then(|v| v.parse::<u64>().ok())
                 .map(std::time::Duration::from_secs),
             vec![],
-        ) {
-            return Err(err);
-        }
+        )?;
 
         let json: Value =
             serde_json::from_str(&text).map_err(|e| GithubError::SchemaMismatch(e.to_string()))?;
 
-        // Check for GraphQL errors
+        // Extract and check for GraphQL errors (2xx body errors)
         let graphql_errors: Vec<String> = json["errors"]
             .as_array()
             .map(|arr| {
@@ -261,9 +263,7 @@ impl GithubApiClient for GithubApiClientImpl {
             })
             .unwrap_or_default();
 
-        if let Some(err) = map_response_error(status, None, graphql_errors) {
-            return Err(err);
-        }
+        map_response_error(status, None, graphql_errors)?;
 
         parse_github_page(json)
     }
@@ -278,6 +278,34 @@ pub fn new_client(token: String, base_url: String) -> impl GithubApiClient {
     }
 }
 
+/// Newtype adapter carrying the client behind an `Arc<dyn GithubApiClient>`.
+///
+/// `GithubSyncImpl` holds `Arc<dyn GithubApiClient>`; wrapping it in this
+/// local newtype lets the shared [`SyncLoop`] (generic over
+/// [`RemoteApiClient`]) drive pagination. The provider's `GithubPage` maps
+/// onto the shared [`Page`] here.
+#[derive(Clone)]
+pub(crate) struct GithubClientAdapter(pub(crate) Arc<dyn GithubApiClient>);
+
+#[async_trait]
+impl RemoteApiClient for GithubClientAdapter {
+    type Item = FetchedPr;
+    type Error = GithubError;
+    type Params = String;
+
+    async fn fetch_page(
+        &self,
+        params: &Self::Params,
+        after: Option<&str>,
+    ) -> std::result::Result<Page<Self::Item>, Self::Error> {
+        let page = self.0.search_page(params, after).await?;
+        Ok(Page {
+            items: page.prs,
+            end_cursor: page.end_cursor,
+            has_next_page: page.has_next_page,
+        })
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
