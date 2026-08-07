@@ -281,6 +281,7 @@ pub fn new_client(token: String, base_url: String) -> impl GithubApiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn sample_response(page_size: usize, cursor: Option<&str>, has_next: bool) -> Value {
         let nodes: Vec<Value> = (0..page_size)
@@ -455,23 +456,14 @@ mod tests {
         assert!(rec.review_requested);
     }
 
-    // Proptest: parse_github_page never panics on arbitrary JSON
-    #[test]
-    fn test_parse_github_page_never_panics_on_arbitrary_json() {
-        // parse_github_page only panics if we have unreachable code paths;
-        // all error branches return SchemaMismatch. Verify on a few shapes.
-        for json in [
-            serde_json::json!({}),
-            serde_json::json!("hello"),
-            serde_json::json!(null),
-            serde_json::json!(42),
-            serde_json::json!([1, 2]),
-            serde_json::json!({ "data": null }),
-            serde_json::json!({ "data": { "search": null } }),
-            serde_json::json!({ "data": { "search": { "nodes": "bad" } } }),
-            serde_json::json!({ "errors": [{ "message": "x" }] }),
-        ] {
-            let _ = parse_github_page(json); // should never panic
+    // parse_github_page only panics if it has an unreachable code path; all
+    // error branches return SchemaMismatch. Exercise arbitrary JSON.
+    proptest! {
+        #[test]
+        fn parse_github_page_never_panics(raw in ".*") {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let _ = parse_github_page(val);
+            }
         }
     }
 }
