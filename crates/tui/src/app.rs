@@ -1017,13 +1017,18 @@ pub(crate) mod tests {
 
     #[test]
     fn test_clamp_cursor_lands_on_first_active_row() {
-        let mut app = App::default();
-        app.view = View::Today;
-        app.data.plan = vec![
-            make_plan_row(1, 0, make_todo(1, "done one", "done"), None),
-            make_plan_row(2, 1, make_todo(2, "started one", "started"), None),
-            make_plan_row(3, 2, make_todo(3, "todo one", "todo"), None),
-        ];
+        let mut app = App {
+            view: View::Today,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "done one", "done"), None),
+                    make_plan_row(2, 1, make_todo(2, "started one", "started"), None),
+                    make_plan_row(3, 2, make_todo(3, "todo one", "todo"), None),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         app.clamp_cursor_to_active();
         assert_eq!(
             app.cursor, 1,
@@ -1033,26 +1038,36 @@ pub(crate) mod tests {
 
     #[test]
     fn test_clamp_cursor_falls_back_to_zero_all_terminal() {
-        let mut app = App::default();
-        app.view = View::Today;
-        app.data.plan = vec![
-            make_plan_row(1, 0, make_todo(1, "done one", "done"), None),
-            make_plan_row(2, 1, make_todo(2, "cancelled one", "cancelled"), None),
-        ];
+        let mut app = App {
+            view: View::Today,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "done one", "done"), None),
+                    make_plan_row(2, 1, make_todo(2, "cancelled one", "cancelled"), None),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         app.clamp_cursor_to_active();
         assert_eq!(app.cursor, 0);
     }
 
     #[test]
     fn test_clamp_cursor_uses_backlog_rows_in_backlog_view() {
-        let mut app = App::default();
-        app.view = View::Backlog;
-        // Backlog excludes todos that appear on today's plan.
-        app.data.plan = vec![make_plan_row(1, 0, make_todo(1, "planned", "done"), None)];
-        app.data.todos = vec![
-            make_todo(2, "done unplanned", "done"),
-            make_todo(3, "todo unplanned", "todo"),
-        ];
+        let mut app = App {
+            view: View::Backlog,
+            data: crate::app::AppData {
+                // Backlog excludes todos that appear on today's plan.
+                plan: vec![make_plan_row(1, 0, make_todo(1, "planned", "done"), None)],
+                todos: vec![
+                    make_todo(2, "done unplanned", "done"),
+                    make_todo(3, "todo unplanned", "todo"),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         app.clamp_cursor_to_active();
         // backlog() = [done, todo]; the first active row is index 1.
         assert_eq!(app.cursor, 1);
@@ -1060,22 +1075,32 @@ pub(crate) mod tests {
 
     #[test]
     fn test_clamp_cursor_leaves_explicit_cursor_alone() {
-        let mut app = App::default();
-        app.view = View::Today;
-        app.cursor = 3;
-        app.data.plan = vec![
-            make_plan_row(1, 0, make_todo(1, "done", "done"), None),
-            make_plan_row(2, 1, make_todo(2, "todo", "todo"), None),
-        ];
+        let mut app = App {
+            view: View::Today,
+            cursor: 3,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "done", "done"), None),
+                    make_plan_row(2, 1, make_todo(2, "todo", "todo"), None),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         app.clamp_cursor_to_active();
         assert_eq!(app.cursor, 3);
     }
 
     #[test]
     fn test_clamp_cursor_is_noop_outside_list_views() {
-        let mut app = App::default();
-        app.view = View::Sync;
-        app.data.plan = vec![make_plan_row(1, 0, make_todo(1, "done", "done"), None)];
+        let mut app = App {
+            view: View::Sync,
+            data: crate::app::AppData {
+                plan: vec![make_plan_row(1, 0, make_todo(1, "done", "done"), None)],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         app.clamp_cursor_to_active();
         assert_eq!(app.cursor, 0);
     }
