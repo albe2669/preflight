@@ -81,6 +81,14 @@ This document defines the architecture, coding, and testing conventions for this
 ├── config/
 │   └── default.toml
 ├── devenv.nix
+├── flake.nix                 # Nix flake: packages.preflight + homeManagerModules.preflight
+├── nix/
+│   ├── package.nix           # naersk build of crates/server -> preflight binary
+│   ├── toml.nix              # renders home-manager settings -> config.toml
+│   ├── modules/
+│   │   └── home-manager.nix  # programs.preflight module
+│   └── tests/
+│       └── eval-module.nix   # standalone module evaluation + render smoke test
 └── GUIDELINES.md
 ```
 
@@ -91,6 +99,32 @@ Rules:
 * Generated code (sea-orm entities, seaography output) is committed to the repo and regenerated with the devenv tasks. Never edit it by hand.
 * `server/src/main.rs` contains wiring and lifecycle only — no business logic, no GraphQL handlers.
 * Keep `crates/` flat. Do not introduce grouping directories. A new concern is a new crate.
+
+### Nix packaging
+
+* The flake (`flake.nix`) exposes `packages.<system>.preflight` (the
+  deployable, named `default` too) and `homeManagerModules.preflight` plus an
+  `overlays.default` so the package is available as `pkgs.preflight`. The
+  home-manager module's `package` option defaults to `pkgs.preflight`.
+* `nix/package.nix` builds the workspace via naersk with `-p server` and
+  renames the `server` binary to `preflight`. It links the system `sqlite`
+  and `openssl` libs (they are not bundled). Build inputs are real package
+  derivations passed from the flake — never bare name strings.
+* `nix/toml.nix` is the config serializer. The app's `SyncConfig` is
+  `deny_unknown_fields` and every required field must be present, so the
+  renderer emits exactly the known keys and always includes
+  `github_token` / `linear_token` (empty when unset) while omitting `null`
+  optionals (`*_token_path`). Nix options are camelCase; the renderer
+  converts them to the snake_case TOML keys the Rust structs expect. **Keep
+  this file in lockstep with `crates/server/src/config.rs`.**
+* `nix/modules/home-manager.nix` is the `programs.preflight` module. It
+  defaults `settings.database.path` to an absolute state path
+  (`~/.local/state/preflight/db.sqlite`) and `settings.server` to
+  `127.0.0.1:8000`, and launches the binary with the rendered config via the
+  `CONFIG` env var. A supplied `configFile` takes precedence over
+  `settings`-rendered content (no merge).
+* `Cargo.lock` is committed: naersk requires it to be present in the source
+  tree for reproducible builds.
 
 ### Why domain crates, not a monolithic `core`
 
@@ -563,6 +597,7 @@ Rules:
 * `main` is the only place config is loaded (once per crate config, fail-fast with the crate name in the error).
 * Cross-field validation beyond what the config format expresses lives in the crate's constructor, which returns an error for invalid config.
 * No secrets in `config/default.toml`. Secrets come from env vars only, never get default values, and never get logged.
+* Every secret has a **`_path` variant**: a `foo`/`foo_path` pair where `foo_path` points at a secrets file (sops-nix style). When set, the file's trimmed contents win over the inline value. This keeps secrets out of config and lets sops-nix manage them without code changes.
 
 ## Logging
 

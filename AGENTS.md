@@ -95,6 +95,21 @@ a real remote API outside `--features live-api`.
 - No secrets in `config/default.toml`. Secrets come from env, never logged.
 - `tracing` only. No `println!`/`eprintln!`/`dbg!` in library crates.
 
+## 6.5 Nix packaging (flake + home-manager)
+
+- The flake (`flake.nix`) exposes `packages.<system>.preflight`,
+  `homeManagerModules.preflight`, and `overlays.default`
+  (`pkgs.preflight`). `nix/` holds the packaging:
+  `nix/package.nix` (naersk build), `nix/toml.nix` (config serializer), and
+  `nix/modules/home-manager.nix` (`programs.preflight`).
+- `nix/toml.nix` emits exactly the keys in `crates/server/src/config.rs`
+  (its `SyncConfig` is `deny_unknown_fields`). Read that file before touching
+  the serializer, and keep them in lockstep when the config schema changes.
+- Config changes that add/remove a required option or rename a TOML key must
+  update `nix/toml.nix` and `nix/modules/home-manager.nix` in the same change.
+- Package dependency changes (Rust crates linking system libs) may add
+  `buildInputs`/`nativeBuildInputs` in `nix/package.nix`.
+
 ## 7. Comments
 
 Comments are the exception. Add one only when the *why* is non-obvious and
@@ -150,6 +165,10 @@ outside `main` (and `main` returns `Result`, not panic).
 - [ ] `cargo clippy -- -D warnings` clean.
 - [ ] Parsing/validation of untrusted input? fuzz/proptest target with seeds.
 - [ ] Documentation added/updated.
+- [ ] Config schema changed? `nix/toml.nix` and `nix/modules/home-manager.nix`
+      updated and in lockstep with `crates/server/src/config.rs`.
+- [ ] Nix change builds: `nix flake check` and `nix build .#preflight` pass;
+      `nix/tests/eval-module.nix` still evaluates.
 - [ ] No panics outside `main`.
 
 If any box is unchecked and you cannot check it, say so explicitly and

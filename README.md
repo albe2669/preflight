@@ -10,7 +10,7 @@ keeps the todo's status completely orthogonal to whether it's on today's list.
 ```
 preflight/
 ├── Cargo.toml                 # workspace (resolver 3)
-├── config/default.toml        # db path, tz, day_start_hour, sync tokens
+├── config/default.toml        # db path, tz, day_start_hour, sync tokens; every secret has a *_path variant
 ├── crates/
 │   ├── todo/src/               # todo domain — reusable, the only writer
 │   │   ├── entity/             # todo, todo_event, todo_day_plan, tag, todo_tag
@@ -82,6 +82,80 @@ cargo run -p server             # serve GraphQL at http://127.0.0.1:8000
 
 The SQLite pool is built with `PRAGMA foreign_keys = ON` (per-connection, off
 by default), `journal_mode(Wal)`, and a busy timeout — see `server/src/db.rs`.
+
+## Installing via Nix (home-manager)
+
+The repo ships a Nix flake that builds the `server` crate into a `preflight`
+binary and provides a `programs.preflight` home-manager module. This is the
+way to install and configure preflight on a NixOS/home-manager system
+(build-config-through-Nix instead of cloning the repo + devenv).
+
+Reference the flake's module and overlay in your home-manager configuration:
+
+```nix
+# flake.nix inputs
+preflight = {
+  url = "github:<you>/preflight";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+
+# home-manager config
+imports = [ preflight.homeManagerModules.preflight ];
+home.packages = with pkgs; [ preflight.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+```
+
+Then enable it:
+
+```nix
+programs.preflight.enable = true;
+programs.preflight.settings = {
+  clock.timezone = "America/New_York";
+  # server.defaults: host = "127.0.0.1", port = 8000 (matching config/default.toml)
+};
+```
+
+The module installs a `preflight` launcher that hands the rendered
+`config.toml` to the server via the `CONFIG` env var, so `preflight` on your
+`PATH` starts the server with the Nix-built configuration.
+
+### Options
+
+- `programs.preflight.enable` — install the packaged binary and launcher.
+- `programs.preflight.package` — the derivation to install. Defaults to the
+  flake package (exposed as `pkgs.preflight` via the `overlays.default`).
+- `programs.preflight.settings.database.path` — absolute SQLite path.
+  **Defaults to `~/.local/state/preflight/db.sqlite`.** A packaged binary has
+  no project root, so a relative path is not meaningful — always use an
+  absolute path here (this differs from source runs, where `db.sqlite`
+  resolves against the repo root).
+- `programs.preflight.settings.clock` — `timezone`, `dayStartHour`.
+- `programs.preflight.settings.sync` — `githubToken`, `githubTokenPath`,
+  `linearToken`, `linearTokenPath`, `github.*`, `linear.*`.
+- `programs.preflight.settings.server` — `host`, `port`, `depthLimit`,
+  `complexityLimit`.
+- `programs.preflight.configFile` — a complete `config.toml` to launch with.
+  When set it takes precedence over any `settings`-rendered content (the
+  module does not merge the two).
+
+### Secrets with sops-nix
+
+Point a `*_token_path` at a decrypted sops-nix secret file. The app reads the
+token from the file (path wins over the inline token), matching the
+source-run behavior. Enable `sops-nix` yourself and reference the resolved
+path:
+
+```nix
+sops.secrets."preflight-github" = { };
+sops.secrets."preflight-linear" = { };
+
+programs.preflight.settings.sync = {
+  githubTokenPath = config.sops.secrets."preflight-github".path;
+  linearTokenPath = config.sops.secrets."preflight-linear".path;
+};
+```
+
+An inline `githubToken` / `linearToken` still works; it is only overridden
+when the corresponding `*_token_path` is set.
 
 ## GraphQL
 
