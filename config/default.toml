@@ -20,11 +20,17 @@ day_start_hour = 4
 [sync]
 # GitHub. Leave the token unset in development; the sync crate treats absence
 # as a no-op. Filters are structured rules — see [[sync.github.filters]] below.
+# Either set `github_token` inline, or point `github_token_path` at a secrets
+# file (sops-nix style) whose trimmed contents are the token. The path wins
+# when both are set.
 github_token = ""
+github_token_path = ""
 
-# Linear. The token is a personal API key. Filters are structured rules —
-# see [[sync.linear.filters]] below.
+# Linear. The token is a personal API key. Either set `linear_token` inline,
+# or point `linear_token_path` at a secrets file. The path wins when both are
+# set. Filters are structured rules — see [[sync.linear.filters]] below.
 linear_token = ""
+linear_token_path = ""
 
 [sync.github]
 # When true, draft PRs are excluded unless authored by the authenticated user.

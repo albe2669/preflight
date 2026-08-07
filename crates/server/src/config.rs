@@ -24,8 +24,28 @@ pub struct ClockConfig {
 pub struct SyncConfig {
     pub github_token: String,
     pub linear_token: String,
+    /// Optional path to a secrets file holding the GitHub token (sops-nix
+    /// style). When set, its trimmed contents win over `github_token`.
+    pub github_token_path: Option<String>,
+    /// Optional path to a secrets file holding the Linear token. When set,
+    /// its trimmed contents win over `linear_token`.
+    pub linear_token_path: Option<String>,
     pub github: GithubSyncConfig,
     pub linear: LinearSyncConfig,
+}
+
+/// Resolve a token from inline config or a secrets file (sops-nix style).
+/// When `path` is set (non-blank) it wins: the file's contents, trimmed, are
+/// the token. Otherwise the inline value is used unchanged.
+pub fn resolve_token(inline: &str, path: Option<&str>) -> anyhow::Result<String> {
+    match path {
+        Some(p) if !p.trim().is_empty() => {
+            let content = std::fs::read_to_string(p)
+                .map_err(|e| anyhow::anyhow!("read token path {p}: {e}"))?;
+            Ok(content.trim().to_string())
+        }
+        _ => Ok(inline.to_string()),
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -239,6 +259,8 @@ filters = []
                     exclude_draft: false,
                 }],
             },
+            github_token_path: None,
+            linear_token_path: None,
             linear: LinearSyncConfig::default(),
         };
         let err = cfg.github.validate().unwrap_err();
@@ -260,6 +282,8 @@ filters = []
                     project_lead: None,
                 }],
             },
+            github_token_path: None,
+            linear_token_path: None,
         };
         let err = cfg.linear.validate().unwrap_err();
         assert!(err.contains("sync.linear.filters[0]"));
@@ -271,6 +295,8 @@ filters = []
         let cfg = SyncConfig {
             github_token: "tok".into(),
             linear_token: "tok".into(),
+            github_token_path: None,
+            linear_token_path: None,
             github: GithubSyncConfig::default(),
             linear: LinearSyncConfig::default(),
         };
@@ -293,5 +319,32 @@ filters = []
         assert!(cfg.sync.github.filters.is_empty());
         assert!(cfg.sync.linear.filters.is_empty());
         assert!(cfg.sync.github.exclude_drafts_unless_authored_by_me);
+    }
+
+    #[test]
+    fn test_resolve_token_inline_when_no_path() {
+        assert_eq!(resolve_token("tok", None).unwrap(), "tok");
+        assert_eq!(resolve_token("tok", Some("")).unwrap(), "tok");
+        assert_eq!(resolve_token("tok", Some("  ")).unwrap(), "tok");
+    }
+
+    #[test]
+    fn test_resolve_token_path_wins_and_trims() {
+        let dir = std::env::temp_dir().join(format!("preflight-tok-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("github-token");
+        std::fs::write(&path, "  secret-token\n").unwrap();
+
+        // Path wins over an inline value, and the contents are trimmed.
+        let resolved = resolve_token("inline-tok", Some(path.to_str().unwrap())).unwrap();
+        assert_eq!(resolved, "secret-token");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_resolve_token_missing_path_errors() {
+        let err = resolve_token("tok", Some("/nonexistent/preflight-token-file")).unwrap_err();
+        assert!(err.to_string().contains("read token path"));
     }
 }

@@ -44,15 +44,23 @@ async fn main() -> anyhow::Result<()> {
             project_lead: r.project_lead.as_deref().map(parse_linear_actor),
         })
         .collect();
+    let github_token = config::resolve_token(
+        &cfg.sync.github_token,
+        cfg.sync.github_token_path.as_deref(),
+    )?;
+    let linear_token = config::resolve_token(
+        &cfg.sync.linear_token,
+        cfg.sync.linear_token_path.as_deref(),
+    )?;
     let github_client: Arc<dyn github::GithubApiClient> = Arc::new(github::new_client(
-        cfg.sync.github_token.clone(),
+        github_token.clone(),
         "https://api.github.com/graphql".to_string(),
     ));
     let github_sync = Arc::new(github::sync::new(
         db.clone(),
         github_client,
         github::sync::GithubOptions {
-            token: cfg.sync.github_token.clone(),
+            token: github_token,
             filters: github_filters,
             exclude_drafts_unless_authored_by_me: cfg
                 .sync
@@ -61,18 +69,17 @@ async fn main() -> anyhow::Result<()> {
         },
     ));
     let linear_client = linear::new_client(
-        cfg.sync.linear_token.clone(),
+        linear_token.clone(),
         "https://api.linear.app/graphql".to_string(),
     );
     let linear_sync = Arc::new(linear::sync::new(
         db.clone(),
         linear_client,
         linear::sync::LinearOptions {
-            token: cfg.sync.linear_token.clone(),
+            token: linear_token,
             filters: linear_filters,
         },
     ));
-
     let schema = graphql::schema_builder(
         db.clone(),
         todo_svc,
