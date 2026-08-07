@@ -78,7 +78,9 @@ impl LinearSync for LinearSyncImpl {
                 cursor::put(&db, "linear", None, "ok", None).await?;
             } else {
                 // Buffer all issues across pages, then upsert all at once.
-                // On error, return PartialResults with no database changes.
+                // A first-page failure surfaces the actual error; a mid-page
+                // failure (after a page succeeded) returns PartialResults
+                // and commits nothing.
                 let result = self.fetch_all_pages(&filter).await;
                 match result {
                     Ok(all_issues) => {
@@ -87,9 +89,13 @@ impl LinearSync for LinearSyncImpl {
                         }
                         cursor::put(&db, "linear", None, "ok", None).await?;
                     }
+                    Err(LinearError::PartialResults) => {
+                        cursor::put(&db, "linear", None, "error", None).await?;
+                        return Err(LinearError::PartialResults);
+                    }
                     Err(err) => {
                         cursor::put(&db, "linear", None, "error", Some(err.to_string())).await?;
-                        return Err(LinearError::PartialResults);
+                        return Err(err);
                     }
                 }
             }
@@ -178,13 +184,26 @@ pub async fn upsert_issue(
 
 impl LinearSyncImpl {
     /// Fetch all pages of issues, buffering them in memory.
+    ///
+    /// A first-page failure returns the actual error. A mid-page failure
+    /// (after at least one page succeeded) returns `PartialResults`.
     async fn fetch_all_pages(&self, filter: &serde_json::Value) -> Result<Vec<IssueRecord>> {
         let mut all_issues: Vec<IssueRecord> = Vec::new();
         let mut after: Option<String> = None;
+        let mut pages_fetched = 0u32;
 
         loop {
-            let page = self.client.issues_page(filter, after.as_deref()).await?;
-
+            let page = match self.client.issues_page(filter, after.as_deref()).await {
+                Ok(p) => p,
+                Err(e) => {
+                    return if pages_fetched > 0 {
+                        Err(LinearError::PartialResults)
+                    } else {
+                        Err(e)
+                    };
+                }
+            };
+            pages_fetched += 1;
             all_issues.extend(page.issues);
 
             if page.has_next_page {

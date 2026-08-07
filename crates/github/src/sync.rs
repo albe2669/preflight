@@ -82,18 +82,27 @@ impl GithubSync for GithubSyncImpl {
         }
 
         // Buffer all PRs across pages before upserting.
-        // If any page fails, we return PartialResults without committing.
+        // A first-page failure surfaces the actual error (Unauthorized,
+        // RateLimited, Remote, SchemaMismatch). A mid-page failure (after
+        // at least one page succeeded) returns PartialResults — the
+        // buffered batch is discarded without committing.
         let mut all_prs: Vec<crate::filters::FetchedPr> = Vec::new();
         let mut after: Option<String> = None;
+        let mut pages_fetched = 0u32;
         loop {
             let page = match self.client.search_page(&query, after.as_deref()).await {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::error!(error = %e, "github page fetch failed");
                     cursor::put(&db, "github", None, "error", Some(e.to_string())).await?;
-                    return Err(GithubError::PartialResults);
+                    return if pages_fetched > 0 {
+                        Err(GithubError::PartialResults)
+                    } else {
+                        Err(e)
+                    };
                 }
             };
+            pages_fetched += 1;
             all_prs.extend(page.prs);
             if page.has_next_page {
                 after = page.end_cursor;

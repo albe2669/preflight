@@ -201,6 +201,10 @@ impl LinearApiClient for LinearApiClientImpl {
             .and_then(|v| v.parse::<u64>().ok())
             .map(std::time::Duration::from_secs);
 
+        // Check HTTP-level errors first (401, 429, 5xx) — the body may not
+        // be JSON on these paths.
+        crate::error::map_response_error(status, retry_after, vec![])?;
+
         let body_text = response.text().await?;
         let json: serde_json::Value =
             serde_json::from_str(&body_text).map_err(|e| LinearError::Remote(e.to_string()))?;

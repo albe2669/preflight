@@ -325,3 +325,425 @@ async fn test_pull_returns_sync_state_model() {
     assert_eq!(state.source, "github");
     assert!(state.last_synced_at.is_some());
 }
+
+// ---------------------------------------------------------------------------
+// httptest integration tests — real reqwest client against in-process server
+// ---------------------------------------------------------------------------
+
+use github::{Author, GithubError, GithubFilter};
+use httptest::{Expectation, Server, matchers::*, responders::status_code};
+use sea_orm::PaginatorTrait;
+
+fn pr_node(number: i64, title: &str, owner: &str, repo: &str) -> serde_json::Value {
+    serde_json::json!({
+        "number": number,
+        "title": title,
+        "url": format!("https://github.com/{owner}/{repo}/pull/{number}"),
+        "state": "OPEN",
+        "author": { "login": "alice" },
+        "createdAt": "2024-06-01T00:00:00Z",
+        "updatedAt": "2024-06-02T00:00:00Z",
+        "repository": { "nameWithOwner": format!("{owner}/{repo}") }
+    })
+}
+
+fn make_graphql_response(
+    nodes: Vec<serde_json::Value>,
+    has_next: bool,
+    end_cursor: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "search": {
+                "pageInfo": {
+                    "endCursor": end_cursor,
+                    "hasNextPage": has_next,
+                },
+                "nodes": nodes,
+            }
+        }
+    })
+}
+
+fn filters_with_me_author() -> Vec<GithubFilter> {
+    vec![GithubFilter {
+        author: Some(Author::Me),
+        ..Default::default()
+    }]
+}
+
+fn make_sync(db: DatabaseConnection, client: Arc<dyn GithubApiClient>) -> impl GithubSync {
+    new(
+        db,
+        client,
+        GithubOptions {
+            token: "test-token".into(),
+            filters: filters_with_me_author(),
+            exclude_drafts_unless_authored_by_me: false,
+        },
+    )
+}
+
+/// Task 9.1 — Single-page fetch: server returns one page with 2 PRs, pull() upserts both.
+#[tokio::test]
+async fn test_single_page_fetch() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    let nodes = vec![
+        pr_node(1, "Fix auth", "preflight", "preflight"),
+        pr_node(2, "Add logging", "preflight", "preflight"),
+    ];
+    let body_str = make_graphql_response(nodes, false, None).to_string();
+
+    server.expect(
+        Expectation::matching(request::method_path("POST", "/"))
+            .times(1..)
+            .respond_with(
+                status_code(200)
+                    .insert_header("content-type", "application/json")
+                    .body(body_str),
+            ),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db.clone(), client);
+    let state = sync.pull().await.unwrap();
+
+    assert_eq!(state.last_status, "ok");
+    assert_eq!(state.last_error, None);
+
+    let count = github::entity::pull_request::Entity::find()
+        .count(&db)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+
+    // Verify timestamps populated
+    let prs = github::entity::pull_request::Entity::find()
+        .all(&db)
+        .await
+        .unwrap();
+    for pr in &prs {
+        assert!(pr.remote_created_at.is_some());
+        assert!(pr.remote_updated_at.is_some());
+    }
+}
+
+/// Task 9.2 — Multi-page: two pages, cursor sent on second request.
+#[tokio::test]
+async fn test_multi_page_fetch() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    // Page 1 — hasNextPage: true, endCursor: "cursor-1"
+    let page1_str = make_graphql_response(
+        vec![pr_node(1, "Page1-PR", "preflight", "preflight")],
+        true,
+        Some("cursor-1"),
+    )
+    .to_string();
+
+    // Page 2 — hasNextPage: false
+    let page2_str = make_graphql_response(
+        vec![pr_node(2, "Page2-PR", "preflight", "preflight")],
+        false,
+        None,
+    )
+    .to_string();
+
+    // First request: no cursor in body (after is null)
+    server.expect(
+        Expectation::matching(all_of![
+            request::method_path("POST", "/"),
+            request::body(matches(r#""after":null"#)),
+        ])
+        .times(1)
+        .respond_with(
+            status_code(200)
+                .insert_header("content-type", "application/json")
+                .body(page1_str),
+        ),
+    );
+
+    // Second request: cursor "cursor-1" in body
+    server.expect(
+        Expectation::matching(all_of![
+            request::method_path("POST", "/"),
+            request::body(matches(r#""after":"cursor-1""#)),
+        ])
+        .times(1)
+        .respond_with(
+            status_code(200)
+                .insert_header("content-type", "application/json")
+                .body(page2_str),
+        ),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db.clone(), client);
+    let state = sync.pull().await.unwrap();
+
+    assert_eq!(state.last_status, "ok");
+    assert_eq!(state.last_error, None);
+
+    let count = github::entity::pull_request::Entity::find()
+        .count(&db)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+}
+
+/// Task 9.3a — 401 → Unauthorized
+#[tokio::test]
+async fn test_error_401_unauthorized() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    server.expect(
+        Expectation::matching(request::method_path("POST", "/"))
+            .times(1)
+            .respond_with(status_code(401)),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db, client);
+    let err = sync.pull().await.unwrap_err();
+
+    assert!(matches!(&err, GithubError::Unauthorized));
+}
+
+/// Task 9.3b — 429 with Retry-After header → PartialResults (sync wraps client errors)
+/// Task 9.3b — 429 with Retry-After header → RateLimited { Some }
+#[tokio::test]
+async fn test_error_429_with_retry_after() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    server.expect(
+        Expectation::matching(request::method_path("POST", "/"))
+            .times(1)
+            .respond_with(status_code(429).insert_header("Retry-After", "60")),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db, client);
+    let err = sync.pull().await.unwrap_err();
+
+    assert!(matches!(
+        &err,
+        GithubError::RateLimited {
+            retry_after: Some(_)
+        }
+    ));
+}
+/// Task 9.3c — 429 without Retry-After → RateLimited { None }
+#[tokio::test]
+async fn test_error_429_without_retry_after() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    server.expect(
+        Expectation::matching(request::method_path("POST", "/"))
+            .times(1)
+            .respond_with(status_code(429)),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db, client);
+    let err = sync.pull().await.unwrap_err();
+
+    assert!(matches!(
+        &err,
+        GithubError::RateLimited { retry_after: None }
+    ));
+}
+/// Task 9.3d — 500 → Remote
+#[tokio::test]
+async fn test_error_500_remote() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    server.expect(
+        Expectation::matching(request::method_path("POST", "/"))
+            .times(1)
+            .respond_with(status_code(500)),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db, client);
+    let err = sync.pull().await.unwrap_err();
+
+    assert!(matches!(&err, GithubError::Remote(_)));
+}
+
+/// Task 9.3e — 2xx with GraphQL errors array → Remote
+#[tokio::test]
+async fn test_error_graphql_errors() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    let body_str = serde_json::json!({
+        "errors": [{ "message": "rate limit exceeded in GraphQL" }]
+    })
+    .to_string();
+
+    server.expect(
+        Expectation::matching(request::method_path("POST", "/"))
+            .times(1)
+            .respond_with(
+                status_code(200)
+                    .insert_header("content-type", "application/json")
+                    .body(body_str),
+            ),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db, client);
+    let err = sync.pull().await.unwrap_err();
+
+    assert!(matches!(&err, GithubError::Remote(_)));
+}
+
+/// Task 9.3f — 2xx body missing data.search → SchemaMismatch
+#[tokio::test]
+async fn test_error_schema_mismatch() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    let body_str = serde_json::json!({
+        "data": {}
+    })
+    .to_string();
+
+    server.expect(
+        Expectation::matching(request::method_path("POST", "/"))
+            .times(1)
+            .respond_with(
+                status_code(200)
+                    .insert_header("content-type", "application/json")
+                    .body(body_str),
+            ),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db, client);
+    let err = sync.pull().await.unwrap_err();
+
+    assert!(matches!(&err, GithubError::SchemaMismatch(_)));
+}
+
+/// Task 9.4 — Atomicity: page 1 ok, page 2 fails → zero rows upserted.
+#[tokio::test]
+async fn test_atomicity_mid_page_failure() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    // Page 1 — returns PR, has_next_page: true
+    let page1_str = make_graphql_response(
+        vec![pr_node(1, "Should-not-appear", "preflight", "preflight")],
+        true,
+        Some("fail-cursor"),
+    )
+    .to_string();
+
+    // First request: no cursor (after is null)
+    server.expect(
+        Expectation::matching(all_of![
+            request::method_path("POST", "/"),
+            request::body(matches(r#""after":null"#)),
+        ])
+        .times(1)
+        .respond_with(
+            status_code(200)
+                .insert_header("content-type", "application/json")
+                .body(page1_str),
+        ),
+    );
+
+    // Second request: cursor present, returns 500
+    server.expect(
+        Expectation::matching(all_of![
+            request::method_path("POST", "/"),
+            request::body(matches(r#""after":"fail-cursor""#)),
+        ])
+        .times(1)
+        .respond_with(status_code(500)),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db.clone(), client);
+    let err = sync.pull().await.unwrap_err();
+
+    assert!(matches!(&err, GithubError::PartialResults));
+
+    // Zero rows upserted — the buffer was discarded
+    let count = github::entity::pull_request::Entity::find()
+        .count(&db)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+/// Task 9.5 — Request encoding: verify headers and compiled query.
+#[tokio::test]
+async fn test_request_encoding() {
+    let db = common::setup_db().await;
+    let server = Server::run();
+
+    let nodes = vec![pr_node(1, "Verify encoding", "preflight", "preflight")];
+    let body_str = make_graphql_response(nodes, false, None).to_string();
+
+    // Expectation validates headers and body content
+    server.expect(
+        Expectation::matching(all_of![
+            request::method_path("POST", "/"),
+            request::headers(contains(("authorization", "Bearer test-token"))),
+            request::headers(contains(("accept", "application/vnd.github+json"))),
+            // The compiled query for author:@me should appear in the body
+            request::body(matches("author:@me")),
+        ])
+        .times(1)
+        .respond_with(
+            status_code(200)
+                .insert_header("content-type", "application/json")
+                .body(body_str),
+        ),
+    );
+
+    let client: Arc<dyn GithubApiClient> = Arc::new(new_client(
+        "test-token".into(),
+        server.url_str("/").to_string(),
+    ));
+    let sync = make_sync(db, client);
+    let state = sync.pull().await.unwrap();
+
+    assert_eq!(state.last_status, "ok");
+}
