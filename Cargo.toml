@@ -9,6 +9,7 @@ members = [
     "crates/github",
     "crates/linear",
     "crates/links",
+    "crates/remote-sync",
     "crates/sync-state",
 ]
 
