@@ -473,6 +473,28 @@ pub fn render_grouped_list<'a>(
     carried_ids: &std::collections::HashSet<i32>,
     trailing_items: Vec<ListItem<'a>>,
 ) -> ListState {
+    // Map each todo-row index to its flat List index. Group headers,
+    // blocked-reason continuations, blank separators, and trailing items
+    // interleave with todo rows, so List selection must use flat indices —
+    // the cursor is a todo-row index and cannot select directly.
+    let mut todo_flat: Vec<usize> = Vec::new();
+    let mut flat: usize = 0;
+    for group in groups {
+        flat += 1; // group header
+        if group.collapsed {
+            continue;
+        }
+        for todo in group.rows.iter() {
+            todo_flat.push(flat);
+            flat += 1;
+            if todo.status == "blocked" && todo.blocked_reason.is_some() {
+                flat += 1; // blocked-reason continuation line
+            }
+        }
+        flat += 1; // blank separator
+    }
+    let selected_flat = todo_flat.get(cursor).copied();
+
     let mut items: Vec<ListItem<'a>> = Vec::new();
     let mut row_idx: usize = 0;
 
@@ -522,7 +544,7 @@ pub fn render_grouped_list<'a>(
         .highlight_style(Style::default().bg(Palette::ROW_HIGHLIGHT));
 
     let mut state = ListState::default();
-    state.select(Some(cursor));
+    state.select(selected_flat);
     f.render_stateful_widget(list, area, &mut state);
     state
 }
@@ -1287,12 +1309,13 @@ mod tests {
 mod render_tests {
     use ratatui::{Terminal, backend::TestBackend};
 
+    use crate::app::tests::make_todo;
     use crate::app::{App, Mode, View};
     use crate::gql::SyncState;
     use crate::test_support::buffer_text;
-    use crate::theme::Glyph;
+    use crate::theme::{Glyph, Palette};
 
-    use super::render_frame;
+    use super::{GroupedSection, render_frame, render_grouped_list};
 
     fn render_frame_text(app: &App) -> String {
         let backend = TestBackend::new(120, 40);
@@ -1305,6 +1328,114 @@ mod render_tests {
         buffer_text(terminal.backend().buffer())
     }
 
+    /// Render with the shared grouped-list renderer, returning the text of
+    /// every row whose background carries the row-highlight color.
+    fn highlighted_grouped_rows(groups: Vec<GroupedSection<'_>>, cursor: usize) -> Vec<String> {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                render_grouped_list(
+                    f,
+                    f.area(),
+                    &groups,
+                    cursor,
+                    &std::collections::HashSet::new(),
+                    vec![],
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        (0..buf.area.height)
+            .filter(|y| {
+                (0..buf.area.width).any(|x| buf[(x, *y)].style().bg == Some(Palette::ROW_HIGHLIGHT))
+            })
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+    #[test]
+    fn test_grouped_list_cursor_offsets_complete_header() {
+        let first = make_todo(1, "first started", "started");
+        let second = make_todo(2, "second started", "started");
+        let third = make_todo(3, "plain todo", "todo");
+        let groups = vec![
+            GroupedSection {
+                label: "STARTED",
+                status: "started",
+                rows: vec![&first, &second],
+                collapsed: false,
+            },
+            GroupedSection {
+                label: "TODO",
+                status: "todo",
+                rows: vec![&third],
+                collapsed: false,
+            },
+        ];
+
+        // cursor 1 = the second todo row. The STARTED header occupies flat
+        // index 0, so the highlight must land on flat index 2, not 1.
+        let rows = highlighted_grouped_rows(groups, 1);
+        assert_eq!(
+            rows.len(),
+            1,
+            "expected exactly one highlighted row, got {rows:?}"
+        );
+        assert!(
+            rows[0].contains("second started"),
+            "expected highlight on the second todo row, got {:?}",
+            rows[0]
+        );
+    }
+    #[test]
+    fn test_grouped_list_single_highlight_with_collapsed_done() {
+        let started = make_todo(1, "started one", "started");
+        let todo = make_todo(2, "todo one", "todo");
+        let done_a = make_todo(3, "done a", "done");
+        let done_b = make_todo(4, "done b", "done");
+        let groups = vec![
+            GroupedSection {
+                label: "STARTED",
+                status: "started",
+                rows: vec![&started],
+                collapsed: false,
+            },
+            GroupedSection {
+                label: "TODO",
+                status: "todo",
+                rows: vec![&todo],
+                collapsed: false,
+            },
+            GroupedSection {
+                label: "DONE",
+                status: "done",
+                rows: vec![&done_a, &done_b],
+                collapsed: true,
+            },
+        ];
+
+        // cursor 1 = the sole TODO row (after the started row). The STARTED
+        // header, group separators, and the collapsed DONE header all consume
+        // visual lines, so the highlight must still land on the TODO row and
+        // nowhere else — in particular not on any header line.
+        let rows = highlighted_grouped_rows(groups, 1);
+        assert_eq!(
+            rows.len(),
+            1,
+            "expected exactly one highlighted row, got {rows:?}"
+        );
+        assert!(
+            rows[0].contains("todo one"),
+            "expected highlight on the TODO row, got {:?}",
+            rows[0]
+        );
+    }
     #[test]
     fn test_render_frame_shows_date_with_weekday() {
         let app = App {

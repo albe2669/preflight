@@ -40,7 +40,10 @@ pub async fn run(endpoint: &str) -> anyhow::Result<()> {
     let fetched = client.fetch_all(&date_str).await;
     let mut app = App::default();
     match fetched {
-        Ok(d) => app.data = crate::app::AppData::from_fetch_all(d),
+        Ok(d) => {
+            app.data = crate::app::AppData::from_fetch_all(d);
+            app.clamp_cursor_to_active();
+        }
         Err(e) => app.set_error(format!("connect failed: {e}")),
     }
 
@@ -98,7 +101,10 @@ async fn run_loop(
         // Drain async messages.
         while let Ok(msg) = rx.try_recv() {
             match msg {
-                AppMsg::FetchAll(d) => app.data = crate::app::AppData::from_fetch_all(d),
+                AppMsg::FetchAll(d) => {
+                    app.data = crate::app::AppData::from_fetch_all(d);
+                    app.clamp_cursor_to_active();
+                }
                 AppMsg::DailyReview(r) => app.review = Some(r),
                 AppMsg::DetailData(id, events) => {
                     app.detail = Some(crate::app::DetailData {
@@ -148,12 +154,14 @@ pub(crate) async fn handle_key(
             let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
             app.view = View::ALL[(idx + 1) % View::ALL.len()];
             app.cursor = 0;
+            app.clamp_cursor_to_active();
             return Ok(false);
         }
         BackTab if app.mode == Mode::Navigate => {
             let idx = View::ALL.iter().position(|v| *v == app.view).unwrap_or(0);
             app.view = View::ALL[(idx + View::ALL.len() - 1) % View::ALL.len()];
             app.cursor = 0;
+            app.clamp_cursor_to_active();
             return Ok(false);
         }
         Char('?') if app.mode == Mode::Navigate => {

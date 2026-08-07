@@ -291,6 +291,26 @@ impl App {
             }
         }
     }
+
+    /// Point the cursor at the first active (`todo`/`started`/`blocked`)
+    /// row for the current list view, skipping leading `done`/`cancelled`
+    /// rows, or 0 when every row is terminal. Only applies when the cursor
+    /// is still at its unset default, so subsequent j/k navigation is
+    /// untouched.
+    pub fn clamp_cursor_to_active(&mut self) {
+        if self.cursor != 0 {
+            return;
+        }
+        let rows = match self.view {
+            View::Today => self.today_plan(),
+            View::Backlog => self.backlog(),
+            _ => return,
+        };
+        self.cursor = rows
+            .iter()
+            .position(|t| matches!(t.status.as_str(), "todo" | "started" | "blocked"))
+            .unwrap_or(0);
+    }
 }
 
 /// Format a backend timestamp (e.g. "2026-08-05 14:31:00 +00:00") as a
@@ -989,5 +1009,72 @@ pub(crate) mod tests {
         assert!(!should_plan_after_create(View::Inbox));
         assert!(!should_plan_after_create(View::Review));
         assert!(!should_plan_after_create(View::Sync));
+    }
+
+    // -- clamp_cursor_to_active tests --
+
+    #[test]
+    fn test_clamp_cursor_lands_on_first_active_row() {
+        let mut app = App::default();
+        app.view = View::Today;
+        app.data.plan = vec![
+            make_plan_row(1, 0, make_todo(1, "done one", "done"), None),
+            make_plan_row(2, 1, make_todo(2, "started one", "started"), None),
+            make_plan_row(3, 2, make_todo(3, "todo one", "todo"), None),
+        ];
+        app.clamp_cursor_to_active();
+        assert_eq!(
+            app.cursor, 1,
+            "cursor should skip the leading done row to land on the first active row"
+        );
+    }
+
+    #[test]
+    fn test_clamp_cursor_falls_back_to_zero_all_terminal() {
+        let mut app = App::default();
+        app.view = View::Today;
+        app.data.plan = vec![
+            make_plan_row(1, 0, make_todo(1, "done one", "done"), None),
+            make_plan_row(2, 1, make_todo(2, "cancelled one", "cancelled"), None),
+        ];
+        app.clamp_cursor_to_active();
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn test_clamp_cursor_uses_backlog_rows_in_backlog_view() {
+        let mut app = App::default();
+        app.view = View::Backlog;
+        // Backlog excludes todos that appear on today's plan.
+        app.data.plan = vec![make_plan_row(1, 0, make_todo(1, "planned", "done"), None)];
+        app.data.todos = vec![
+            make_todo(2, "done unplanned", "done"),
+            make_todo(3, "todo unplanned", "todo"),
+        ];
+        app.clamp_cursor_to_active();
+        // backlog() = [done, todo]; the first active row is index 1.
+        assert_eq!(app.cursor, 1);
+    }
+
+    #[test]
+    fn test_clamp_cursor_leaves_explicit_cursor_alone() {
+        let mut app = App::default();
+        app.view = View::Today;
+        app.cursor = 3;
+        app.data.plan = vec![
+            make_plan_row(1, 0, make_todo(1, "done", "done"), None),
+            make_plan_row(2, 1, make_todo(2, "todo", "todo"), None),
+        ];
+        app.clamp_cursor_to_active();
+        assert_eq!(app.cursor, 3);
+    }
+
+    #[test]
+    fn test_clamp_cursor_is_noop_outside_list_views() {
+        let mut app = App::default();
+        app.view = View::Sync;
+        app.data.plan = vec![make_plan_row(1, 0, make_todo(1, "done", "done"), None)];
+        app.clamp_cursor_to_active();
+        assert_eq!(app.cursor, 0);
     }
 }

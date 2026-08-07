@@ -207,8 +207,8 @@ pub(crate) async fn handle_navigate(
         }
         KeyCode::Char('b') => {
             // Pick from backlog — switch to Backlog view.
-            app.view = View::Backlog;
             app.cursor = 0;
+            app.clamp_cursor_to_active();
         }
         KeyCode::Char('R') => {
             // Daily review of yesterday.
