@@ -241,7 +241,7 @@ async fn test_pull_with_token_marks_ok() {
         db.clone(),
         linear::LinearOptions {
             token: "fake-token".into(),
-            team_keys: vec![],
+            filters: vec![],
         },
     );
     let result = svc.pull().await.unwrap();
@@ -259,7 +259,10 @@ async fn test_pull_returns_sync_state_model() {
         db.clone(),
         linear::LinearOptions {
             token: "fake-token".into(),
-            team_keys: vec!["ENG".into()],
+            filters: vec![linear::LinearFilter {
+                team: Some("ENG".into()),
+                ..Default::default()
+            }],
         },
     );
 

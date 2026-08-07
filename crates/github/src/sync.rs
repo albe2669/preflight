@@ -1,6 +1,8 @@
 //! GitHub pull stub and PR upsert helper.
+
 use crate::entity::enums::PullRequestState;
 use crate::entity::pull_request;
+use crate::filters::compile_github_query;
 use async_trait::async_trait;
 use chrono::Utc;
 use sea_orm::{
@@ -21,8 +23,11 @@ pub trait GithubSync: Send + Sync {
 #[derive(Clone, Debug, Default)]
 pub struct GithubOptions {
     pub token: String,
-    pub query: String,
+    pub filters: Vec<crate::filters::GithubFilter>,
+    pub exclude_drafts_unless_authored_by_me: bool,
 }
+
+pub use crate::filters::GithubFilter;
 
 /// Concrete implementation — private outside the crate.
 pub(crate) struct GithubSyncImpl {
@@ -54,14 +59,10 @@ impl GithubSync for GithubSyncImpl {
             )
             .await?;
         } else {
-            // TODO(network): query GitHub search API with `self.opts.query` and upsert PRs.
-            //
-            // The real implementation will:
-            //   1. Build a GitHub search query from `self.opts.query`.
-            //   2. Paginate results.
-            //   3. Call `upsert_pr` for each PR.
-            //   4. Update the cursor with the last seen value.
+            let query = compile_github_query(&self.opts.filters);
+            tracing::debug!(query = %query, "compiled github sync query");
 
+            // TODO(network): query GitHub search API with the compiled query and upsert PRs.
             cursor::put(&db, "github", None, "ok", None).await?;
         }
 

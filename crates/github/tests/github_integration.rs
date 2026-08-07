@@ -192,7 +192,8 @@ async fn test_pull_with_token_marks_ok() {
         db.clone(),
         GithubOptions {
             token: "fake-token".into(),
-            query: "repo:preflight/preflight".into(),
+            filters: vec![],
+            exclude_drafts_unless_authored_by_me: false,
         },
     );
     let state = sync.pull().await.unwrap();
@@ -210,7 +211,8 @@ async fn test_pull_returns_sync_state_model() {
         db.clone(),
         GithubOptions {
             token: "fake".into(),
-            query: "".into(),
+            filters: vec![],
+            exclude_drafts_unless_authored_by_me: false,
         },
     );
     let state = sync.pull().await.unwrap();

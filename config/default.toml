@@ -18,15 +18,34 @@ timezone = "America/Los_Angeles"
 day_start_hour = 4
 
 [sync]
-# GitHub. `search_query` is a saved-search query (e.g. "review-requested:<user>").
-# Leave the token unset in development; the sync crate treats absence as a no-op.
+# GitHub. Leave the token unset in development; the sync crate treats absence
+# as a no-op. Filters are structured rules — see [[sync.github.filters]] below.
 github_token = ""
-github_search_query = "review-requested:@me"
 
-# Linear. The token is a personal API key. `team_keys` filters ingest to those
-# teams; an empty list means "all teams I can see".
+# Linear. The token is a personal API key. Filters are structured rules —
+# see [[sync.linear.filters]] below.
 linear_token = ""
-linear_team_keys = []
+
+[sync.github]
+# When true, draft PRs are excluded unless authored by the authenticated user.
+exclude_drafts_unless_authored_by_me = true
+# Each rule matches a PR by repo, author, reviewer, reviewing_team, and/or
+# exclude_draft. Rules are OR-ed; conditions within a rule are AND-ed.
+# Examples:
+#   { author = "me" }
+#   { repo = "api-specs", reviewing_team = "ai-agents", exclude_draft = true }
+#   { repo = "agent-api", exclude_draft = true }
+#   { repo = "albe2669/" }
+filters = []
+
+[sync.linear]
+# Each rule matches an issue by team, assignee, creator, and/or project_lead.
+# author/assignee/creator/project_lead accept "me" or a name. Examples:
+#   { creator = "me" }
+#   { assignee = "me" }
+#   { team = "ENG", assignee = "me" }
+#   { project_lead = "me" }
+filters = []
 
 [server]
 host = "127.0.0.1"

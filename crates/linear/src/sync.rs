@@ -10,6 +10,8 @@ use sea_orm::{
 use crate::cursor;
 use crate::error::{LinearError, Result};
 
+pub use crate::filters::LinearFilter;
+
 #[async_trait]
 pub trait LinearSync: Send + Sync {
     async fn pull(&self) -> Result<sync_state::entity::sync_state::Model>;
@@ -19,7 +21,7 @@ pub trait LinearSync: Send + Sync {
 #[derive(Clone, Debug, Default)]
 pub struct LinearOptions {
     pub token: String,
-    pub team_keys: Vec<String>,
+    pub filters: Vec<LinearFilter>,
 }
 
 /// Concrete implementation — private outside the crate.
@@ -52,14 +54,8 @@ impl LinearSync for LinearSyncImpl {
             )
             .await?;
         } else {
-            // TODO(network): query Linear GraphQL API.
-            //
-            // The real implementation will:
-            //   1. Build a GraphQL query for the requested team keys.
-            //   2. Paginate results.
-            //   3. Call `upsert_issue` for each issue.
-            //   4. Update the cursor with the last seen value.
-
+            let filter = crate::filters::compile_linear_filter(&self.opts.filters);
+            tracing::debug!(filter = %filter, "compiled linear sync filter");
             cursor::put(&db, "linear", None, "ok", None).await?;
         }
 
