@@ -119,6 +119,7 @@ pub(crate) async fn handle_navigate(
                     id,
                     field: SidebarField::Description,
                     input_active: false,
+                    title_input: td.title.clone(),
                     desc_input: desc,
                     desc_scroll: 0,
                     tag_input: String::new(),

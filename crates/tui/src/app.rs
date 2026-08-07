@@ -76,6 +76,7 @@ pub enum Mode {
         id: i32,
         field: SidebarField,
         input_active: bool,
+        title_input: String,
         desc_input: String,
         desc_scroll: usize,
         tag_input: String,
@@ -88,6 +89,7 @@ pub enum Mode {
 /// Which field is focused in the sidebar edit form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarField {
+    Title,
     Description,
     Links,
     Tags,

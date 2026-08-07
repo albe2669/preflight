@@ -735,6 +735,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         id,
         field,
         input_active,
+        title_input,
         desc_input,
         tag_input,
         link_kind,
@@ -752,6 +753,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     let link_kind = *link_kind;
     let link_selection = *link_selection;
     let scroll = *scroll;
+    let title_input: &str = title_input;
     let desc_input: &str = desc_input;
     let tag_input: &str = tag_input;
 
@@ -784,18 +786,51 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     let (glyph, color) = status_glyph(&todo.status);
     let mut lines: Vec<Line> = Vec::new();
 
-    // Title (read-only)
+    // Title (read-only, always visible)
     lines.push(Line::from(vec![
         Span::styled(glyph.to_string(), Style::default().fg(color)),
         Span::raw(" "),
         Span::styled(todo.title.clone(), Style::default().fg(Palette::TEXT)),
     ]));
-    lines.push(Line::from(Span::styled(
-        "r to edit title",
-        Style::default().fg(Palette::GHOST),
-    )));
     lines.push(Line::from(""));
 
+    // TITLE (editable form field)
+    let title_header = if field == crate::app::SidebarField::Title {
+        if input_active {
+            Span::styled(
+                "▸ TITLE",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                "  TITLE",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )
+        }
+    } else {
+        Span::styled("  TITLE", Style::default().fg(Palette::DIM))
+    };
+    lines.push(Line::from(title_header));
+    if input_active && field == crate::app::SidebarField::Title {
+        lines.push(Line::from(Span::styled(
+            title_input,
+            Style::default().fg(Palette::TEXT),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            if title_input.is_empty() {
+                "—"
+            } else {
+                title_input
+            },
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+    lines.push(Line::from(""));
     // DESCRIPTION
     let desc_header = if field == crate::app::SidebarField::Description {
         if input_active {

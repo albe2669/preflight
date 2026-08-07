@@ -726,6 +726,7 @@ pub(crate) async fn handle_sidebar_edit(
         id,
         field,
         input_active,
+        title_input,
         desc_input,
         _desc_scroll,
         tag_input,
@@ -737,6 +738,7 @@ pub(crate) async fn handle_sidebar_edit(
             id,
             field,
             input_active,
+            title_input,
             desc_input,
             desc_scroll,
             tag_input,
@@ -747,6 +749,7 @@ pub(crate) async fn handle_sidebar_edit(
             *id,
             *field,
             *input_active,
+            title_input.clone(),
             desc_input.clone(),
             *desc_scroll,
             tag_input.clone(),
@@ -770,9 +773,10 @@ pub(crate) async fn handle_sidebar_edit(
         match key {
             Char('\t') | Char('j') => {
                 let next_field = match field {
+                    SidebarField::Title => SidebarField::Description,
                     SidebarField::Description => SidebarField::Links,
                     SidebarField::Links => SidebarField::Tags,
-                    SidebarField::Tags => SidebarField::Description,
+                    SidebarField::Tags => SidebarField::Title,
                 };
                 if let Mode::SidebarEdit { field, scroll, .. } = &mut app.mode {
                     *field = next_field;
@@ -781,7 +785,8 @@ pub(crate) async fn handle_sidebar_edit(
             }
             BackTab => {
                 let prev_field = match field {
-                    SidebarField::Description => SidebarField::Tags,
+                    SidebarField::Title => SidebarField::Tags,
+                    SidebarField::Description => SidebarField::Title,
                     SidebarField::Links => SidebarField::Description,
                     SidebarField::Tags => SidebarField::Links,
                 };
@@ -792,7 +797,8 @@ pub(crate) async fn handle_sidebar_edit(
             }
             Char('k') => {
                 let prev_field = match field {
-                    SidebarField::Description => SidebarField::Tags,
+                    SidebarField::Title => SidebarField::Tags,
+                    SidebarField::Description => SidebarField::Title,
                     SidebarField::Links => SidebarField::Description,
                     SidebarField::Tags => SidebarField::Links,
                 };
@@ -815,6 +821,74 @@ pub(crate) async fn handle_sidebar_edit(
     } else {
         // Input active mode — field-specific editing
         match field {
+            SidebarField::Title => {
+                match key {
+                    Char(c)
+                        if c.is_alphanumeric()
+                            || c == ' '
+                            || c == '#'
+                            || c == '-'
+                            || c == '_'
+                            || c == '.'
+                            || c == ','
+                            || c == '!'
+                            || c == '?'
+                            || c == '('
+                            || c == ')'
+                            || c == '['
+                            || c == ']'
+                            || c == ':'
+                            || c == ';'
+                            || c == '/'
+                            || c == '\\' =>
+                    {
+                        if let Mode::SidebarEdit { title_input, .. } = &mut app.mode {
+                            title_input.push(c);
+                        }
+                    }
+                    Char('\n') => {
+                        // Commit title: update_todo(id, Some(title), None).
+                        let title = title_input.trim().to_string();
+                        let c = client.clone();
+                        let t = tx.clone();
+                        tokio::spawn(async move {
+                            if c.update_todo(id, Some(&title), None).await.is_ok() {
+                                let _ = t
+                                    .send(crate::AppMsg::Toast(
+                                        ToastKind::Success,
+                                        "title saved".into(),
+                                    ))
+                                    .await;
+                                let _ = t.send(crate::AppMsg::Refresh).await;
+                            }
+                        });
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    Backspace => {
+                        if let Mode::SidebarEdit { title_input, .. } = &mut app.mode {
+                            title_input.pop();
+                        }
+                    }
+                    Down => {
+                        if let Mode::SidebarEdit { scroll, .. } = &mut app.mode {
+                            *scroll = scroll.saturating_add(1);
+                        }
+                    }
+                    Up => {
+                        if let Mode::SidebarEdit { scroll, .. } = &mut app.mode {
+                            *scroll = scroll.saturating_sub(1);
+                        }
+                    }
+                    Esc => {
+                        if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
+                            *input_active = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
             SidebarField::Description => {
                 match key {
                     Char(c)
@@ -1483,6 +1557,7 @@ mod sidebar_edit_tests {
             id: 1,
             field: SidebarField::Description,
             input_active: false,
+            title_input: String::new(),
             desc_input: String::new(),
             desc_scroll: 0,
             tag_input: String::new(),
@@ -1698,7 +1773,17 @@ mod sidebar_edit_tests {
             panic!("expected SidebarEdit");
         }
 
-        // Tags -> Description (wraps)
+        // Tags -> Title (wraps)
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(*field, SidebarField::Title);
+        } else {
+            panic!("expected SidebarEdit");
+        }
+
+        // Title -> Description (wraps)
         super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
             .await
             .unwrap();
@@ -1733,12 +1818,12 @@ mod sidebar_edit_tests {
         enter_sidebar_edit(&mut app);
         let (client, _) = test_client();
 
-        // Description -> Tags (backward)
+        // Description -> Title (backward)
         super::handle_sidebar_edit(&mut app, KeyCode::Char('k'), &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { field, .. } = &app.mode {
-            assert_eq!(*field, SidebarField::Tags);
+            assert_eq!(*field, SidebarField::Title);
         } else {
             panic!("expected SidebarEdit");
         }
@@ -1751,12 +1836,12 @@ mod sidebar_edit_tests {
         enter_sidebar_edit(&mut app);
         let (client, _) = test_client();
 
-        // Description -> Tags (backward)
+        // Description -> Title (backward)
         super::handle_sidebar_edit(&mut app, KeyCode::BackTab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { field, .. } = &app.mode {
-            assert_eq!(*field, SidebarField::Tags);
+            assert_eq!(*field, SidebarField::Title);
         } else {
             panic!("expected SidebarEdit");
         }
@@ -2505,5 +2590,187 @@ mod sidebar_edit_tests {
             .await
             .unwrap();
         assert_eq!(app.mode, Mode::Navigate);
+    }
+
+    // -- title field: reachable, seeded, commit/cancel, no r binding --
+
+    #[tokio::test]
+    async fn test_title_field_seeded_from_current_title() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        crate::handle_key(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { title_input, .. } = &app.mode {
+            assert_eq!(
+                title_input, "My Task",
+                "title input should be seeded from the todo title"
+            );
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_title_field_reachable_via_navigation() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // Backward from Description -> Title.
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('k'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { field, .. } = &app.mode {
+            assert_eq!(
+                *field,
+                SidebarField::Title,
+                "Title should be reachable via backward navigation"
+            );
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_title_commit_deactivates_input_and_stays_in_edit() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        // Navigate to Title and activate input.
+        if let Mode::SidebarEdit {
+            field,
+            input_active,
+            ..
+        } = &mut app.mode
+        {
+            *field = SidebarField::Title;
+            *input_active = true;
+        }
+        let (client, _) = test_client();
+        // Typing then Enter commits the title (mutation runs async).
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('N'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('\n'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { input_active, .. } = &app.mode {
+            assert!(
+                !input_active,
+                "Enter on title should deactivate input (commit)"
+            );
+        } else {
+            panic!("expected SidebarEdit");
+        }
+        // Mode stays in SidebarEdit after commit.
+        assert!(matches!(app.mode, Mode::SidebarEdit { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_title_esc_deactivates_without_committing() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        if let Mode::SidebarEdit {
+            field,
+            input_active,
+            ..
+        } = &mut app.mode
+        {
+            *field = SidebarField::Title;
+            *input_active = true;
+        }
+        let (client, _) = test_client();
+        // Type a char then Esc: Esc deactivates, input keeps the char.
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('X'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit {
+            title_input,
+            input_active,
+            ..
+        } = &app.mode
+        {
+            assert!(!input_active, "Esc should deactivate title input");
+            assert_eq!(title_input, "X", "Esc should not discard typed input");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_r_in_edit_mode_does_not_inline_edit_title() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let (client, _) = test_client();
+
+        // r while in sidebar edit mode must not enter InlineEdit.
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('r'), &client, &tx)
+            .await
+            .unwrap();
+        assert!(
+            matches!(app.mode, Mode::SidebarEdit { .. }),
+            "r in edit mode should be ignored (no inline title edit)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_title_input_typing_and_backspace() {
+        let (_, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        if let Mode::SidebarEdit {
+            field,
+            input_active,
+            ..
+        } = &mut app.mode
+        {
+            *field = SidebarField::Title;
+            *input_active = true;
+        }
+        let (client, _) = test_client();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('N'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('e'), &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { title_input, .. } = &app.mode {
+            assert_eq!(title_input, "Ne", "typing appends to title input");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+        super::handle_sidebar_edit(&mut app, KeyCode::Backspace, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { title_input, .. } = &app.mode {
+            assert_eq!(title_input, "N", "backspace pops from title input");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[test]
+    fn test_sidebar_edit_form_removes_dead_r_hint() {
+        let mut app = setup_app_with_todo();
+        enter_sidebar_edit(&mut app);
+        let output = render_full(&mut app);
+        assert!(
+            !output.contains("r to edit title"),
+            "the dead 'r to edit title' hint must be removed:\n{output}"
+        );
+        assert!(
+            output.contains("TITLE") || output.contains("▸ TITLE") || output.contains("  TITLE"),
+            "the editable TITLE field should render:\n{output}"
+        );
     }
 }
