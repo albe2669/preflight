@@ -1055,16 +1055,27 @@ pub(crate) async fn handle_sidebar_edit(
                     Enter => {
                         let slug = tag_input.trim().to_string();
                         if !slug.is_empty() {
+                            // A slug already on this todo removes the tag;
+                            // anything else adds it.
+                            let exists = tag_commit_is_removal(app, id, &slug);
                             let c = client.clone();
                             let t = tx.clone();
                             let slug2 = slug.clone();
                             tokio::spawn(async move {
-                                // Check if tag already exists on the todo by looking at app.detail
-                                if c.add_tag(id, &slug2).await.is_ok() {
+                                let result = if exists {
+                                    c.remove_tag(id, &slug2).await
+                                } else {
+                                    c.add_tag(id, &slug2).await
+                                };
+                                if result.is_ok() {
                                     let _ = t
                                         .send(crate::AppMsg::Toast(
                                             ToastKind::Success,
-                                            "tag added".into(),
+                                            if exists {
+                                                "tag removed".into()
+                                            } else {
+                                                "tag added".into()
+                                            },
                                         ))
                                         .await;
                                     let _ = t.send(crate::AppMsg::Refresh).await;
@@ -1091,7 +1102,19 @@ pub(crate) async fn handle_sidebar_edit(
             }
         }
     }
+
     Ok(false)
+}
+
+/// A tag slug that already exists on the todo is removed on commit;
+/// anything else is added. Pure decision used by the Tags field.
+fn tag_commit_is_removal(app: &App, id: i32, slug: &str) -> bool {
+    app.data
+        .todos
+        .iter()
+        .find(|t| t.id == id)
+        .map(|t| t.tag.nodes.iter().any(|tg| tg.slug == slug))
+        .unwrap_or(false)
 }
 
 // ---- Status-selection popup ----
@@ -1437,6 +1460,87 @@ mod tests {
         assert_eq!(lower.len(), upper.len());
         assert_eq!(lower.len(), 1);
         assert_eq!(lower[0].0, "Global");
+    }
+
+    // -- tag_commit_is_removal (sidebar tag removal) --
+
+    #[test]
+    fn test_tag_commit_is_removal_when_slug_exists() {
+        let app = App {
+            data: crate::app::AppData {
+                todos: vec![crate::app::tests::make_todo_with_tags(
+                    1,
+                    "Task",
+                    "todo",
+                    &["rust", "tui"],
+                )],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            tag_commit_is_removal(&app, 1, "rust"),
+            "an existing slug removes the tag"
+        );
+    }
+
+    #[test]
+    fn test_tag_commit_not_removal_for_new_slug() {
+        let app = App {
+            data: crate::app::AppData {
+                todos: vec![crate::app::tests::make_todo_with_tags(
+                    1,
+                    "Task",
+                    "todo",
+                    &["rust"],
+                )],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            !tag_commit_is_removal(&app, 1, "linear"),
+            "a new slug is added, not removed"
+        );
+    }
+
+    #[test]
+    fn test_tag_commit_not_removal_when_only_tag_is_last() {
+        let app = App {
+            data: crate::app::AppData {
+                todos: vec![crate::app::tests::make_todo_with_tags(
+                    1,
+                    "Task",
+                    "todo",
+                    &["only"],
+                )],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // Re-committing the last (only) tag still counts as removal so the
+        // tags region can reach the empty state.
+        assert!(tag_commit_is_removal(&app, 1, "only"));
+    }
+
+    #[test]
+    fn test_tag_commit_not_removal_for_unknown_todo() {
+        let app = App {
+            data: crate::app::AppData {
+                todos: vec![crate::app::tests::make_todo_with_tags(
+                    1,
+                    "Task",
+                    "todo",
+                    &["rust"],
+                )],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            !tag_commit_is_removal(&app, 999, "rust"),
+            "unknown todo defaults to add"
+        );
     }
 }
 #[cfg(test)]
