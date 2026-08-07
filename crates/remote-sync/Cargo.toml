@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 sync-state.workspace = true
 sea-orm.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true }

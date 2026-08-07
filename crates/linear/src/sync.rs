@@ -1,6 +1,4 @@
 //! Linear pull stub and issue upsert helper.
-use std::sync::Arc;
-
 use crate::entity::linear_issue;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -9,15 +7,18 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, Set,
 };
+use sync_state::entity::sync_state;
 
+use crate::client::LinearClientAdapter;
 use crate::cursor;
 use crate::error::{LinearError, Result};
 /// Re-export so callers construct via `linear::sync::LinearFilter`.
 pub use crate::filters::LinearFilter;
+use remote_sync::sync::SyncLoop;
 
 #[async_trait]
 pub trait LinearSync: Send + Sync {
-    async fn pull(&self) -> Result<sync_state::entity::sync_state::Model>;
+    async fn pull(&self) -> Result<sync_state::Model>;
 }
 
 /// Configuration for the Linear sync provider.
@@ -27,11 +28,12 @@ pub struct LinearOptions {
     pub filters: Vec<LinearFilter>,
 }
 
-/// Concrete implementation — private outside the crate.
+/// Concrete implementation — private outside the crate. The client is
+/// carried as a cloneable adapter so the shared [`SyncLoop`] can drive it.
 pub(crate) struct LinearSyncImpl {
     db: DatabaseConnection,
     opts: LinearOptions,
-    client: Arc<dyn crate::client::LinearApiClient>,
+    client: LinearClientAdapter,
 }
 
 /// Constructor — returns the trait so callers cannot depend on the concrete type.
@@ -40,11 +42,8 @@ pub fn new(
     client: impl crate::client::LinearApiClient + 'static,
     opts: LinearOptions,
 ) -> impl LinearSync {
-    LinearSyncImpl {
-        db,
-        opts,
-        client: Arc::new(client),
-    }
+    let client = LinearClientAdapter(std::sync::Arc::new(client));
+    LinearSyncImpl { db, opts, client }
 }
 
 #[async_trait]
@@ -56,7 +55,7 @@ impl LinearSync for LinearSyncImpl {
     /// Otherwise paginates through all issues, buffers them, and upserts
     /// all at once. On mid-page error, returns PartialResults with no
     /// database changes.
-    async fn pull(&self) -> Result<sync_state::entity::sync_state::Model> {
+    async fn pull(&self) -> Result<sync_state::Model> {
         let db = self.db.clone();
         let token = self.opts.token.clone();
 
@@ -81,19 +80,20 @@ impl LinearSync for LinearSyncImpl {
                 // A first-page failure surfaces the actual error; a mid-page
                 // failure (after a page succeeded) returns PartialResults
                 // and commits nothing.
-                let result = self.fetch_all_pages(&filter).await;
+                let result = SyncLoop::new(self.client.clone()).run(&filter).await;
                 match result {
-                    Ok(all_issues) => {
-                        for issue in &all_issues {
+                    Ok(sync_result) => {
+                        for issue in &sync_result.items {
                             upsert_issue(&db, issue).await?;
                         }
                         cursor::put(&db, "linear", None, "ok", None).await?;
                     }
-                    Err(LinearError::PartialResults) => {
-                        cursor::put(&db, "linear", None, "error", None).await?;
-                        return Err(LinearError::PartialResults);
-                    }
-                    Err(err) => {
+                    Err(remote_err) => {
+                        let err: LinearError = remote_err.into();
+                        if let LinearError::PartialResults = err {
+                            cursor::put(&db, "linear", None, "error", None).await?;
+                            return Err(LinearError::PartialResults);
+                        }
                         cursor::put(&db, "linear", None, "error", Some(err.to_string())).await?;
                         return Err(err);
                     }
@@ -101,7 +101,7 @@ impl LinearSync for LinearSyncImpl {
             }
         }
 
-        sync_state::entity::sync_state::Entity::find_by_id("linear")
+        sync_state::Entity::find_by_id("linear")
             .one(&db)
             .await?
             .ok_or_else(|| LinearError::NotFound)
@@ -182,44 +182,6 @@ pub async fn upsert_issue(
     }
 }
 
-impl LinearSyncImpl {
-    /// Fetch all pages of issues, buffering them in memory.
-    ///
-    /// A first-page failure returns the actual error. A mid-page failure
-    /// (after at least one page succeeded) returns `PartialResults`.
-    async fn fetch_all_pages(&self, filter: &serde_json::Value) -> Result<Vec<IssueRecord>> {
-        let mut all_issues: Vec<IssueRecord> = Vec::new();
-        let mut after: Option<String> = None;
-        let mut pages_fetched = 0u32;
-
-        loop {
-            let page = match self.client.issues_page(filter, after.as_deref()).await {
-                Ok(p) => p,
-                Err(e) => {
-                    return if pages_fetched > 0 {
-                        Err(LinearError::PartialResults)
-                    } else {
-                        Err(e)
-                    };
-                }
-            };
-            pages_fetched += 1;
-            all_issues.extend(page.issues);
-
-            if page.has_next_page {
-                after = Some(
-                    page.end_cursor
-                        .ok_or(LinearError::PaginationCursorInvalid)?,
-                );
-            } else {
-                break;
-            }
-        }
-
-        Ok(all_issues)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,17 +191,29 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    struct FakeClient {
+    /// Shared state behind the fake client so a clone can assert call counts.
+    struct FakeInner {
         pages: parking_lot::Mutex<Vec<std::result::Result<LinearPage, LinearError>>>,
         call_count: AtomicUsize,
+    }
+
+    #[derive(Clone)]
+    struct FakeClient {
+        inner: Arc<FakeInner>,
     }
 
     impl FakeClient {
         fn new(pages: Vec<std::result::Result<LinearPage, LinearError>>) -> Self {
             Self {
-                pages: parking_lot::Mutex::new(pages),
-                call_count: AtomicUsize::new(0),
+                inner: Arc::new(FakeInner {
+                    pages: parking_lot::Mutex::new(pages),
+                    call_count: AtomicUsize::new(0),
+                }),
             }
+        }
+
+        fn call_count(&self) -> usize {
+            self.inner.call_count.load(Ordering::SeqCst)
         }
     }
 
@@ -250,8 +224,8 @@ mod tests {
             _filter: &serde_json::Value,
             _after: Option<&str>,
         ) -> Result<LinearPage> {
-            self.call_count.fetch_add(1, Ordering::SeqCst);
-            let mut pages = self.pages.lock();
+            self.inner.call_count.fetch_add(1, Ordering::SeqCst);
+            let mut pages = self.inner.pages.lock();
             pages
                 .pop()
                 .unwrap_or_else(|| Err(LinearError::Remote("no more pages".into())))
@@ -298,7 +272,7 @@ mod tests {
         LinearSyncImpl {
             db,
             opts,
-            client: fake,
+            client: LinearClientAdapter(fake),
         }
     }
 
@@ -376,7 +350,7 @@ mod tests {
         let count = linear_issue::Entity::find().count(&db).await.unwrap();
         assert_eq!(count, 1);
 
-        assert_eq!(fake.call_count.load(Ordering::SeqCst), 1);
+        assert_eq!(fake.call_count(), 1);
     }
 
     #[tokio::test]
@@ -406,6 +380,6 @@ mod tests {
         let result = svc.pull().await.expect("pull should succeed");
         assert_eq!(result.last_status, "ok");
 
-        assert_eq!(fake.call_count.load(Ordering::SeqCst), 0);
+        assert_eq!(fake.call_count(), 0);
     }
 }

@@ -21,6 +21,14 @@ pub enum CursorError {
     Db(#[from] sea_orm::DbErr),
 }
 
+impl From<CursorError> for sea_orm::DbErr {
+    fn from(e: CursorError) -> Self {
+        match e {
+            CursorError::Db(d) => d,
+        }
+    }
+}
+
 /// Read the cursor for a source, if any.
 pub async fn get(db: &DatabaseConnection, source: &str) -> Result<Option<String>, CursorError> {
     let row = sync_state::Entity::find()

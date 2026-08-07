@@ -25,32 +25,43 @@ pub enum LinearError {
     #[error("schema mismatch")]
     SchemaMismatch,
 }
-
 impl From<reqwest::Error> for LinearError {
     fn from(e: reqwest::Error) -> Self {
         LinearError::Remote(e.to_string())
     }
 }
 
+impl From<remote_sync::error::RemoteError<LinearError>> for LinearError {
+    fn from(e: remote_sync::error::RemoteError<LinearError>) -> Self {
+        match e {
+            remote_sync::error::RemoteError::RateLimited { retry_after } => {
+                LinearError::RateLimited { retry_after }
+            }
+            remote_sync::error::RemoteError::Unauthorized => LinearError::Unauthorized,
+            remote_sync::error::RemoteError::Remote(msg) => LinearError::Remote(msg),
+            remote_sync::error::RemoteError::PaginationCursorInvalid => {
+                LinearError::PaginationCursorInvalid
+            }
+            remote_sync::error::RemoteError::PartialResults => LinearError::PartialResults,
+            remote_sync::error::RemoteError::ContentFiltered => LinearError::ContentFiltered,
+            remote_sync::error::RemoteError::SchemaMismatch(_) => LinearError::SchemaMismatch,
+            remote_sync::error::RemoteError::Provider(e) => e,
+        }
+    }
+}
+
 /// Map an HTTP response status and optional GraphQL errors to a [`LinearError`].
 ///
 /// Returns `Ok(())` when the status is 2xx and there are no GraphQL errors.
+/// Delegates to the shared [`remote_sync::error::map_response_error`] and
+/// translates the sentinel onto [`LinearError`].
 pub(crate) fn map_response_error(
     status: u16,
     retry_after: Option<Duration>,
     graphql_errors: Vec<String>,
 ) -> std::result::Result<(), LinearError> {
-    if !graphql_errors.is_empty() {
-        return Err(LinearError::Remote(graphql_errors.join("; ")));
-    }
-
-    match status {
-        200..=299 => Ok(()),
-        401 => Err(LinearError::Unauthorized),
-        429 => Err(LinearError::RateLimited { retry_after }),
-        500..=599 => Err(LinearError::Remote(format!("HTTP {}", status))),
-        other => Err(LinearError::Remote(format!("HTTP {}", other))),
-    }
+    remote_sync::error::map_response_error(status, retry_after, &graphql_errors)
+        .map_err(LinearError::from)
 }
 
 #[cfg(test)]

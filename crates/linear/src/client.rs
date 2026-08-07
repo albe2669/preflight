@@ -1,5 +1,10 @@
 //! Linear API client trait and response types.
 
+use std::sync::Arc;
+
+use remote_sync::page::Page;
+use remote_sync::sync::RemoteApiClient;
+
 use async_trait::async_trait;
 
 use crate::error::{LinearError, Result};
@@ -146,6 +151,7 @@ fn parse_issue_node(node: &serde_json::Value) -> Option<IssueRecord> {
 }
 
 /// Concrete Linear API client — private outside the crate.
+#[derive(Clone)]
 pub(crate) struct LinearApiClientImpl {
     client: reqwest::Client,
     token: String,
@@ -263,6 +269,35 @@ impl LinearApiClientImpl {
         }
         "#
         .to_string()
+    }
+}
+
+/// Newtype adapter carrying the client behind an `Arc<dyn LinearApiClient>`.
+///
+/// `new` receives `impl LinearApiClient`; boxing it as a trait object and
+/// wrapping in this local newtype lets the shared [`SyncLoop`] (generic over
+/// [`RemoteApiClient`]) drive it. The provider's `LinearPage` maps onto the
+/// shared [`Page`] here.
+#[derive(Clone)]
+pub(crate) struct LinearClientAdapter(pub(crate) Arc<dyn LinearApiClient>);
+
+#[async_trait]
+impl RemoteApiClient for LinearClientAdapter {
+    type Item = IssueRecord;
+    type Error = LinearError;
+    type Params = serde_json::Value;
+
+    async fn fetch_page(
+        &self,
+        params: &Self::Params,
+        after: Option<&str>,
+    ) -> Result<Page<Self::Item>, Self::Error> {
+        let page = self.0.issues_page(params, after).await?;
+        Ok(Page {
+            items: page.issues,
+            end_cursor: page.end_cursor,
+            has_next_page: page.has_next_page,
+        })
     }
 }
 

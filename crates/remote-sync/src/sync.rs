@@ -10,17 +10,16 @@
 
 use crate::error::RemoteError;
 use crate::page::Page;
+use async_trait::async_trait;
 
 /// A client that can fetch one page of provider items.
 ///
 /// Each provider implements this for its private concrete client type in
 /// its own `client.rs`, mapping its page type onto [`Page<Item>`]. `Params`
 /// is whatever the provider's page fetch needs beyond the cursor (e.g. a
-/// `RemoteApiClient` is only ever used as a generic bound on [`SyncLoop`],
-/// never as a `dyn` trait object, so the missing auto-trait bounds are
-/// irrelevant; native `async fn` keeps the provider impls dependency-free.
-#[allow(async_fn_in_trait)]
-pub trait RemoteApiClient {
+/// compiled Linear filter or a GitHub query string).
+#[async_trait]
+pub trait RemoteApiClient: Send + Sync {
     /// The provider's item type (e.g. `IssueRecord`).
     type Item;
     /// The provider's error type (e.g. `LinearError`).
@@ -143,6 +142,7 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl RemoteApiClient for FakeClient {
         type Item = i32;
         type Error = TestError;

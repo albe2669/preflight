@@ -3,8 +3,8 @@
 //! [`RemoteError`] carries the sentinel variants every provider surfaces
 //! (`RateLimited`, `Unauthorized`, `Remote`, …) while wrapping the
 //! provider's own error type in `Provider(E)`. [`map_response_error`] maps
-//! a raw HTTP response onto those sentinels, decoupled from any concrete
-//! HTTP client type via the [`ResponseSource`] trait.
+//! raw HTTP status / `Retry-After` / GraphQL errors onto those sentinels,
+//! keeping this crate free of any concrete HTTP client type.
 
 use std::time::Duration;
 
@@ -40,36 +40,24 @@ pub enum RemoteError<E> {
     Provider(#[from] E),
 }
 
-/// Something `map_response_error` can classify by status, giving the
-/// provider control over how `Retry-After` is decoded without this crate
-/// depending on a concrete HTTP type.
-pub trait ResponseSource {
-    fn status(&self) -> u16;
-    /// Seconds to wait before retrying, if the remote provided one.
-    fn retry_after(&self) -> Option<Duration>;
-}
-
 /// Map an HTTP response onto a [`RemoteError`] sentinel, as `Result<(), E>`.
 ///
-/// GraphQL errors in the body are handled before status dispatch, matching
-/// the existing provider behaviour. 2xx → `Ok`; 401 → `Unauthorized`;
-/// 403/429 → `RateLimited{retry_after}`; everything else → `Remote`.
-pub fn map_response_error<S: ResponseSource>(
-    source: &S,
-    graphql_errors: Option<&[String]>,
-) -> Result<(), RemoteError<()>> {
-    if let Some(errors) = graphql_errors {
-        if let Some(first) = errors.first() {
-            return Err(RemoteError::Remote(first.clone()));
+/// GraphQL errors are handled before status dispatch, matching the existing
+/// provider behaviour. 2xx → `Ok`; 401 → `Unauthorized`; 403/429 →
+pub fn map_response_error<E: std::fmt::Display>(
+    status: u16,
+    retry_after: Option<Duration>,
+    graphql_errors: &[String],
+) -> Result<(), RemoteError<E>> {
+    if graphql_errors.is_empty() {
+        match status {
+            200..=299 => Ok(()),
+            401 => Err(RemoteError::Unauthorized),
+            403 | 429 => Err(RemoteError::RateLimited { retry_after }),
+            _ => Err(RemoteError::Remote(format!("HTTP {status}"))),
         }
-    }
-    match source.status() {
-        200..=299 => Ok(()),
-        401 => Err(RemoteError::Unauthorized),
-        403 | 429 => Err(RemoteError::RateLimited {
-            retry_after: source.retry_after(),
-        }),
-        _ => Err(RemoteError::Remote(format!("HTTP {}", source.status()))),
+    } else {
+        Err(RemoteError::Remote(graphql_errors.join("; ")))
     }
 }
 
@@ -77,44 +65,32 @@ pub fn map_response_error<S: ResponseSource>(
 mod tests {
     use super::*;
 
-    struct StatusOnly(u16);
+    struct TestError;
 
-    impl ResponseSource for StatusOnly {
-        fn status(&self) -> u16 {
-            self.0
-        }
-        fn retry_after(&self) -> Option<Duration> {
-            None
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "test error")
         }
     }
 
-    struct WithRetryAfter(u16, Option<Duration>);
+    type R = Result<(), RemoteError<TestError>>;
 
-    impl ResponseSource for WithRetryAfter {
-        fn status(&self) -> u16 {
-            self.0
-        }
-        fn retry_after(&self) -> Option<Duration> {
-            self.1
-        }
-    }
-
-    fn assert_sentinel(r: Result<(), RemoteError<()>>, pred: impl Fn(RemoteError<()>) -> bool) {
+    fn assert_sentinel(r: R, pred: impl Fn(&RemoteError<TestError>) -> bool) {
         match r {
             Ok(()) => panic!("expected error, got Ok"),
-            Err(e) => assert!(pred(e), "unexpected error"),
+            Err(e) => assert!(pred(&e), "unexpected error: {e}"),
         }
     }
 
     #[test]
     fn ok_on_2xx() {
-        assert!(map_response_error(&StatusOnly(200), None).is_ok());
-        assert!(map_response_error(&StatusOnly(299), None).is_ok());
+        assert!(map_response_error::<TestError>(200, None, &[]).is_ok());
+        assert!(map_response_error::<TestError>(299, None, &[]).is_ok());
     }
 
     #[test]
     fn unauthorized_on_401() {
-        assert_sentinel(map_response_error(&StatusOnly(401), None), |e| {
+        assert_sentinel(map_response_error(401, None, &[]), |e| {
             matches!(e, RemoteError::Unauthorized)
         });
     }
@@ -122,7 +98,7 @@ mod tests {
     #[test]
     fn rate_limited_on_429_with_retry_after() {
         assert_sentinel(
-            map_response_error(&WithRetryAfter(429, Some(Duration::from_secs(60))), None),
+            map_response_error(429, Some(Duration::from_secs(60)), &[]),
             |e| {
                 matches!(
                     e,
@@ -136,7 +112,7 @@ mod tests {
 
     #[test]
     fn rate_limited_on_429_without_retry_after() {
-        assert_sentinel(map_response_error(&WithRetryAfter(429, None), None), |e| {
+        assert_sentinel(map_response_error(429, None, &[]), |e| {
             matches!(e, RemoteError::RateLimited { retry_after: None })
         });
     }
@@ -144,7 +120,7 @@ mod tests {
     #[test]
     fn rate_limited_on_403() {
         assert_sentinel(
-            map_response_error(&WithRetryAfter(403, Some(Duration::from_secs(5))), None),
+            map_response_error(403, Some(Duration::from_secs(5)), &[]),
             |e| {
                 matches!(
                     e,
@@ -158,29 +134,30 @@ mod tests {
 
     #[test]
     fn remote_on_5xx() {
-        assert_sentinel(map_response_error(&StatusOnly(500), None), |e| {
-            matches!(e, RemoteError::Remote(_))
-        });
+        assert_sentinel(
+            map_response_error(500, None, &[]),
+            |e| matches!(e, RemoteError::Remote(m) if m == "HTTP 500"),
+        );
     }
 
     #[test]
     fn remote_on_other_status() {
-        assert_sentinel(map_response_error(&StatusOnly(418), None), |e| {
+        assert_sentinel(map_response_error(418, None, &[]), |e| {
             matches!(e, RemoteError::Remote(_))
         });
     }
 
     #[test]
     fn graphql_errors_preempt_status() {
-        let errs = vec!["boom".to_string()];
+        let errs = vec!["boom".to_string(), "oops".to_string()];
         assert_sentinel(
-            map_response_error(&StatusOnly(200), Some(&errs)),
-            |e| matches!(e, RemoteError::Remote(m) if m == "boom"),
+            map_response_error(200, None, &errs),
+            |e| matches!(e, RemoteError::Remote(m) if m == "boom; oops"),
         );
     }
 
     #[test]
     fn empty_graphql_errors_are_ignored() {
-        assert!(map_response_error(&StatusOnly(200), Some(&[])).is_ok());
+        assert!(map_response_error::<TestError>(200, None, &[]).is_ok());
     }
 }
