@@ -1,7 +1,10 @@
 //! Linear pull stub and issue upsert helper.
+use std::sync::Arc;
+
 use crate::entity::linear_issue;
 use async_trait::async_trait;
 use chrono::Utc;
+use sea_orm::entity::prelude::DateTimeWithTimeZone;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, Set,
@@ -9,7 +12,7 @@ use sea_orm::{
 
 use crate::cursor;
 use crate::error::{LinearError, Result};
-
+/// Re-export so callers construct via `linear::sync::LinearFilter`.
 pub use crate::filters::LinearFilter;
 
 #[async_trait]
@@ -28,11 +31,20 @@ pub struct LinearOptions {
 pub(crate) struct LinearSyncImpl {
     db: DatabaseConnection,
     opts: LinearOptions,
+    client: Arc<dyn crate::client::LinearApiClient>,
 }
 
 /// Constructor — returns the trait so callers cannot depend on the concrete type.
-pub fn new(db: DatabaseConnection, opts: LinearOptions) -> impl LinearSync {
-    LinearSyncImpl { db, opts }
+pub fn new(
+    db: DatabaseConnection,
+    client: impl crate::client::LinearApiClient + 'static,
+    opts: LinearOptions,
+) -> impl LinearSync {
+    LinearSyncImpl {
+        db,
+        opts,
+        client: Arc::new(client),
+    }
 }
 
 #[async_trait]
@@ -40,10 +52,14 @@ impl LinearSync for LinearSyncImpl {
     /// Pull issues from Linear.
     ///
     /// When `token` is empty the call is a no-op (cursor marked "never").
-    /// Otherwise this is a stub — the real HTTP body is marked `TODO(network)`.
+    /// When filters are empty, returns ok without fetching.
+    /// Otherwise paginates through all issues, buffers them, and upserts
+    /// all at once. On mid-page error, returns PartialResults with no
+    /// database changes.
     async fn pull(&self) -> Result<sync_state::entity::sync_state::Model> {
         let db = self.db.clone();
         let token = self.opts.token.clone();
+
         if token.is_empty() {
             cursor::put(
                 &db,
@@ -56,7 +72,27 @@ impl LinearSync for LinearSyncImpl {
         } else {
             let filter = crate::filters::compile_linear_filter(&self.opts.filters);
             tracing::debug!(filter = %filter, "compiled linear sync filter");
-            cursor::put(&db, "linear", None, "ok", None).await?;
+
+            // If filter is null (no filters configured), skip fetch
+            if filter.is_null() {
+                cursor::put(&db, "linear", None, "ok", None).await?;
+            } else {
+                // Buffer all issues across pages, then upsert all at once.
+                // On error, return PartialResults with no database changes.
+                let result = self.fetch_all_pages(&filter).await;
+                match result {
+                    Ok(all_issues) => {
+                        for issue in &all_issues {
+                            upsert_issue(&db, issue).await?;
+                        }
+                        cursor::put(&db, "linear", None, "ok", None).await?;
+                    }
+                    Err(err) => {
+                        cursor::put(&db, "linear", None, "error", Some(err.to_string())).await?;
+                        return Err(LinearError::PartialResults);
+                    }
+                }
+            }
         }
 
         sync_state::entity::sync_state::Entity::find_by_id("linear")
@@ -80,6 +116,8 @@ pub struct IssueRecord {
     pub team_key: Option<String>,
     pub assignee_name: Option<String>,
     pub assigned_to_me: bool,
+    pub remote_created_at: Option<DateTimeWithTimeZone>,
+    pub remote_updated_at: Option<DateTimeWithTimeZone>,
 }
 
 /// Idempotently upsert a Linear issue row.
@@ -110,6 +148,7 @@ pub async fn upsert_issue(
             am.team_key = Set(rec.team_key.as_deref().map(|s| s.to_string()));
             am.assignee_name = Set(rec.assignee_name.as_deref().map(|s| s.to_string()));
             am.assigned_to_me = Set(rec.assigned_to_me);
+            am.remote_updated_at = Set(rec.remote_updated_at);
             am.synced_at = Set(synced);
             Ok(am.update(db).await?)
         }
@@ -127,12 +166,227 @@ pub async fn upsert_issue(
                 team_key: Set(rec.team_key.as_deref().map(|s| s.to_string())),
                 assignee_name: Set(rec.assignee_name.as_deref().map(|s| s.to_string())),
                 assigned_to_me: Set(rec.assigned_to_me),
-                remote_created_at: Set(None),
-                remote_updated_at: Set(None),
+                remote_created_at: Set(rec.remote_created_at),
+                remote_updated_at: Set(rec.remote_updated_at),
                 synced_at: Set(synced),
                 dismissed_at: Set(None),
             };
             Ok(am.insert(db).await?)
         }
+    }
+}
+
+impl LinearSyncImpl {
+    /// Fetch all pages of issues, buffering them in memory.
+    async fn fetch_all_pages(&self, filter: &serde_json::Value) -> Result<Vec<IssueRecord>> {
+        let mut all_issues: Vec<IssueRecord> = Vec::new();
+        let mut after: Option<String> = None;
+
+        loop {
+            let page = self.client.issues_page(filter, after.as_deref()).await?;
+
+            all_issues.extend(page.issues);
+
+            if page.has_next_page {
+                after = Some(
+                    page.end_cursor
+                        .ok_or(LinearError::PaginationCursorInvalid)?,
+                );
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_issues)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{LinearApiClient, LinearPage};
+    use migration::MigratorTrait;
+    use sea_orm::PaginatorTrait;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FakeClient {
+        pages: parking_lot::Mutex<Vec<std::result::Result<LinearPage, LinearError>>>,
+        call_count: AtomicUsize,
+    }
+
+    impl FakeClient {
+        fn new(pages: Vec<std::result::Result<LinearPage, LinearError>>) -> Self {
+            Self {
+                pages: parking_lot::Mutex::new(pages),
+                call_count: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LinearApiClient for FakeClient {
+        async fn issues_page(
+            &self,
+            _filter: &serde_json::Value,
+            _after: Option<&str>,
+        ) -> Result<LinearPage> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            let mut pages = self.pages.lock();
+            pages
+                .pop()
+                .unwrap_or_else(|| Err(LinearError::Remote("no more pages".into())))
+        }
+    }
+
+    fn make_page(issue_id: &str, end_cursor: Option<&str>, has_next_page: bool) -> LinearPage {
+        LinearPage {
+            issues: vec![IssueRecord {
+                linear_id: issue_id.to_string(),
+                identifier: format!("ENG-{issue_id}"),
+                title: format!("Issue {issue_id}"),
+                description: None,
+                url: format!("https://linear.test/{issue_id}"),
+                state_name: "Todo".into(),
+                state_type: "triage".into(),
+                priority: None,
+                team_key: None,
+                assignee_name: None,
+                assigned_to_me: false,
+                remote_created_at: None,
+                remote_updated_at: None,
+            }],
+            end_cursor: end_cursor.map(str::to_string),
+            has_next_page,
+        }
+    }
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("connect memory db");
+        migration::Migrator::up(&db, None)
+            .await
+            .expect("migrations");
+        db
+    }
+
+    fn build_svc(
+        db: DatabaseConnection,
+        fake: Arc<FakeClient>,
+        opts: LinearOptions,
+    ) -> LinearSyncImpl {
+        LinearSyncImpl {
+            db,
+            opts,
+            client: fake,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pull_two_pages_upserts_all_issues() {
+        let db = setup_db().await;
+        let fake = Arc::new(FakeClient::new(vec![
+            Ok(make_page("issue-2", None, false)),
+            Ok(make_page("issue-1", Some("X"), true)),
+        ]));
+        let svc = build_svc(
+            db.clone(),
+            fake,
+            LinearOptions {
+                token: "fake-token".into(),
+                filters: vec![LinearFilter {
+                    team: Some("ENG".into()),
+                    ..Default::default()
+                }],
+            },
+        );
+
+        let result = svc.pull().await.expect("pull should succeed");
+        assert_eq!(result.last_status, "ok");
+
+        let count = linear_issue::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_pull_mid_page_error_returns_partial_results() {
+        let db = setup_db().await;
+        let fake = Arc::new(FakeClient::new(vec![
+            Err(LinearError::Remote("server error".into())),
+            Ok(make_page("issue-1", Some("X"), true)),
+        ]));
+        let svc = build_svc(
+            db.clone(),
+            fake,
+            LinearOptions {
+                token: "fake-token".into(),
+                filters: vec![LinearFilter {
+                    team: Some("ENG".into()),
+                    ..Default::default()
+                }],
+            },
+        );
+
+        let result = svc.pull().await;
+        assert!(matches!(result, Err(LinearError::PartialResults)));
+
+        let count = linear_issue::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_pull_single_page_upserts_and_stops() {
+        let db = setup_db().await;
+        let fake = Arc::new(FakeClient::new(vec![Ok(make_page("issue-1", None, false))]));
+        let svc = build_svc(
+            db.clone(),
+            fake.clone(),
+            LinearOptions {
+                token: "fake-token".into(),
+                filters: vec![LinearFilter {
+                    team: Some("ENG".into()),
+                    ..Default::default()
+                }],
+            },
+        );
+
+        let result = svc.pull().await.expect("pull should succeed");
+        assert_eq!(result.last_status, "ok");
+
+        let count = linear_issue::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 1);
+
+        assert_eq!(fake.call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_pull_no_token_marks_never() {
+        let db = setup_db().await;
+        let fake = Arc::new(FakeClient::new(vec![]));
+        let svc = build_svc(db.clone(), fake, LinearOptions::default());
+
+        let result = svc.pull().await.expect("pull should succeed");
+        assert_eq!(result.last_status, "never");
+        assert_eq!(result.last_error, Some("no token configured".into()));
+    }
+
+    #[tokio::test]
+    async fn test_pull_empty_filters_returns_ok_no_requests() {
+        let db = setup_db().await;
+        let fake = Arc::new(FakeClient::new(vec![]));
+        let svc = build_svc(
+            db.clone(),
+            fake.clone(),
+            LinearOptions {
+                token: "fake-token".into(),
+                filters: vec![],
+            },
+        );
+
+        let result = svc.pull().await.expect("pull should succeed");
+        assert_eq!(result.last_status, "ok");
+
+        assert_eq!(fake.call_count.load(Ordering::SeqCst), 0);
     }
 }

@@ -44,8 +44,13 @@ async fn main() -> anyhow::Result<()> {
             project_lead: r.project_lead.as_deref().map(parse_linear_actor),
         })
         .collect();
+    let github_client: Arc<dyn github::GithubApiClient> = Arc::new(github::new_client(
+        cfg.sync.github_token.clone(),
+        "https://api.github.com/graphql".to_string(),
+    ));
     let github_sync = Arc::new(github::sync::new(
         db.clone(),
+        github_client,
         github::sync::GithubOptions {
             token: cfg.sync.github_token.clone(),
             filters: github_filters,
@@ -55,8 +60,13 @@ async fn main() -> anyhow::Result<()> {
                 .exclude_drafts_unless_authored_by_me,
         },
     ));
+    let linear_client = linear::new_client(
+        cfg.sync.linear_token.clone(),
+        "https://api.linear.app/graphql".to_string(),
+    );
     let linear_sync = Arc::new(linear::sync::new(
         db.clone(),
+        linear_client,
         linear::sync::LinearOptions {
             token: cfg.sync.linear_token.clone(),
             filters: linear_filters,

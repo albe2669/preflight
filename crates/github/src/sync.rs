@@ -1,8 +1,11 @@
-//! GitHub pull stub and PR upsert helper.
+//! GitHub pull loop and PR upsert helper.
 
+use std::sync::Arc;
+
+use crate::client::{GithubApiClient, fetched_to_record};
 use crate::entity::enums::PullRequestState;
 use crate::entity::pull_request;
-use crate::filters::compile_github_query;
+use crate::filters::{apply_draft_policy, compile_github_query};
 use async_trait::async_trait;
 use chrono::Utc;
 use sea_orm::{
@@ -32,23 +35,25 @@ pub use crate::filters::GithubFilter;
 /// Concrete implementation — private outside the crate.
 pub(crate) struct GithubSyncImpl {
     db: DatabaseConnection,
+    client: Arc<dyn GithubApiClient>,
     opts: GithubOptions,
 }
 
 /// Constructor — returns the trait so callers cannot depend on the concrete type.
-pub fn new(db: DatabaseConnection, opts: GithubOptions) -> impl GithubSync {
-    GithubSyncImpl { db, opts }
+pub fn new(
+    db: DatabaseConnection,
+    client: Arc<dyn GithubApiClient>,
+    opts: GithubOptions,
+) -> impl GithubSync {
+    GithubSyncImpl { db, client, opts }
 }
 
 #[async_trait]
 impl GithubSync for GithubSyncImpl {
-    /// Pull open pull requests from GitHub.
-    ///
-    /// When `token` is empty the call is a no-op (cursor marked "never").
-    /// Otherwise this is a stub — the real HTTP body is marked `TODO(network)`.
     async fn pull(&self) -> Result<sync_state::Model> {
         let db = self.db.clone();
         let token = self.opts.token.clone();
+
         if token.is_empty() {
             cursor::put(
                 &db,
@@ -58,14 +63,55 @@ impl GithubSync for GithubSyncImpl {
                 Some("no token configured".into()),
             )
             .await?;
-        } else {
-            let query = compile_github_query(&self.opts.filters);
-            tracing::debug!(query = %query, "compiled github sync query");
-
-            // TODO(network): query GitHub search API with the compiled query and upsert PRs.
-            cursor::put(&db, "github", None, "ok", None).await?;
+            return sync_state::Entity::find_by_id("github")
+                .one(&db)
+                .await?
+                .ok_or_else(|| GithubError::NotFound);
         }
 
+        let query = compile_github_query(&self.opts.filters);
+        tracing::debug!(query = %query, "compiled github sync query");
+
+        // Empty filters → no-op, mark ok
+        if query.is_empty() {
+            cursor::put(&db, "github", None, "ok", None).await?;
+            return sync_state::Entity::find_by_id("github")
+                .one(&db)
+                .await?
+                .ok_or_else(|| GithubError::NotFound);
+        }
+
+        // Buffer all PRs across pages before upserting.
+        // If any page fails, we return PartialResults without committing.
+        let mut all_prs: Vec<crate::filters::FetchedPr> = Vec::new();
+        let mut after: Option<String> = None;
+        loop {
+            let page = match self.client.search_page(&query, after.as_deref()).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!(error = %e, "github page fetch failed");
+                    cursor::put(&db, "github", None, "error", Some(e.to_string())).await?;
+                    return Err(GithubError::PartialResults);
+                }
+            };
+            all_prs.extend(page.prs);
+            if page.has_next_page {
+                after = page.end_cursor;
+            } else {
+                break;
+            }
+        }
+
+        // Post-fetch filters
+        let filtered = apply_draft_policy(all_prs, self.opts.exclude_drafts_unless_authored_by_me);
+
+        // Upsert each PR
+        for fetched in &filtered {
+            let rec = fetched_to_record(fetched);
+            upsert_pr(&db, &rec).await?;
+        }
+
+        cursor::put(&db, "github", after, "ok", None).await?;
         sync_state::Entity::find_by_id("github")
             .one(&db)
             .await?
@@ -86,6 +132,8 @@ pub struct PrRecord {
     pub state: PullRequestState,
     pub review_requested: bool,
     pub authored_by_me: bool,
+    pub remote_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub remote_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Idempotently upsert a GitHub pull request row.
@@ -113,6 +161,7 @@ pub async fn upsert_pr(db: &DatabaseConnection, rec: &PrRecord) -> Result<pull_r
             am.state = Set(rec.state.clone());
             am.review_requested = Set(rec.review_requested);
             am.authored_by_me = Set(rec.authored_by_me);
+            am.remote_updated_at = Set(rec.remote_updated_at.map(|dt| dt.into()));
             am.synced_at = Set(synced);
             Ok(am.update(db).await?)
         }
@@ -129,12 +178,291 @@ pub async fn upsert_pr(db: &DatabaseConnection, rec: &PrRecord) -> Result<pull_r
                 state: Set(rec.state.clone()),
                 review_requested: Set(rec.review_requested),
                 authored_by_me: Set(rec.authored_by_me),
-                remote_created_at: Set(None),
-                remote_updated_at: Set(None),
+                remote_created_at: Set(rec.remote_created_at.map(|dt| dt.into())),
+                remote_updated_at: Set(rec.remote_updated_at.map(|dt| dt.into())),
                 synced_at: Set(synced),
                 dismissed_at: Set(None),
             };
             Ok(am.insert(db).await?)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{GithubApiClient, GithubPage};
+    use crate::filters::FetchedPr;
+    use migration::MigratorTrait;
+    use parking_lot::Mutex;
+    use sea_orm::{EntityTrait, PaginatorTrait};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FakeClient {
+        pages: Arc<Mutex<Vec<GithubPage>>>,
+        call_count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl GithubApiClient for FakeClient {
+        async fn search_page(
+            &self,
+            _query: &str,
+            _after: Option<&str>,
+        ) -> crate::error::Result<GithubPage> {
+            let idx = self.call_count.fetch_add(1, Ordering::Relaxed);
+            let pages = self.pages.lock();
+            Ok(pages[idx].clone())
+        }
+    }
+
+    struct FailingClient {
+        pages_before_fail: Arc<Mutex<Vec<GithubPage>>>,
+        call_count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl GithubApiClient for FailingClient {
+        async fn search_page(
+            &self,
+            _query: &str,
+            _after: Option<&str>,
+        ) -> crate::error::Result<GithubPage> {
+            let idx = self.call_count.fetch_add(1, Ordering::Relaxed);
+            let pages = self.pages_before_fail.lock();
+            if idx < pages.len() {
+                Ok(pages[idx].clone())
+            } else {
+                Err(GithubError::Remote("boom".into()))
+            }
+        }
+    }
+
+    fn fetched_pr(number: i64, is_draft: bool, authored_by_me: bool) -> FetchedPr {
+        FetchedPr {
+            repo_owner: "org".into(),
+            repo_name: "repo".into(),
+            number,
+            title: format!("PR #{number}"),
+            url: format!("https://github.com/org/repo/pull/{number}"),
+            author_login: Some("alice".into()),
+            state: "open".into(),
+            is_draft,
+            review_requested: false,
+            requested_reviewer_teams: vec![],
+            authored_by_me,
+            remote_created_at: None,
+            remote_updated_at: None,
+        }
+    }
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        migration::Migrator::up(&db, None).await.unwrap();
+        db
+    }
+
+    // Task 6.3 — single page → ok
+    #[tokio::test]
+    async fn test_pull_single_page_ok() {
+        let db = setup_db().await;
+
+        let page = GithubPage {
+            prs: vec![fetched_pr(42, false, false)],
+            end_cursor: None,
+            has_next_page: false,
+        };
+        let client = FakeClient {
+            pages: Arc::new(Mutex::new(vec![page])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![GithubFilter {
+                    repo: Some("org/repo".into()),
+                    ..Default::default()
+                }],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+        let state = sync.pull().await.unwrap();
+
+        assert_eq!(state.source, "github");
+        assert_eq!(state.last_status, "ok");
+
+        let count = pull_request::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 1);
+    }
+
+    // Task 6.1 — two pages → ok
+    #[tokio::test]
+    async fn test_pull_two_pages_ok() {
+        let db = setup_db().await;
+
+        let client = FakeClient {
+            pages: Arc::new(Mutex::new(vec![
+                GithubPage {
+                    prs: vec![fetched_pr(1, false, false)],
+                    end_cursor: Some("X".into()),
+                    has_next_page: true,
+                },
+                GithubPage {
+                    prs: vec![fetched_pr(2, false, false)],
+                    end_cursor: None,
+                    has_next_page: false,
+                },
+            ])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![GithubFilter {
+                    repo: Some("org/repo".into()),
+                    ..Default::default()
+                }],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+        let state = sync.pull().await.unwrap();
+
+        assert_eq!(state.last_status, "ok");
+
+        let count = pull_request::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 2);
+    }
+
+    // Task 6.2 — mid-page error → PartialResults, no commit
+    #[tokio::test]
+    async fn test_pull_mid_page_error_partial_results_no_commit() {
+        let db = setup_db().await;
+
+        let client = FailingClient {
+            pages_before_fail: Arc::new(Mutex::new(vec![GithubPage {
+                prs: vec![fetched_pr(1, false, false)],
+                end_cursor: Some("X".into()),
+                has_next_page: true,
+            }])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![GithubFilter {
+                    repo: Some("org/repo".into()),
+                    ..Default::default()
+                }],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+        let result = sync.pull().await;
+
+        assert!(matches!(result, Err(GithubError::PartialResults)));
+
+        let count = pull_request::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    // Task 6.5a — no-token → never
+    #[tokio::test]
+    async fn test_pull_no_token_marks_never() {
+        let db = setup_db().await;
+
+        let client = FakeClient {
+            pages: Arc::new(Mutex::new(vec![])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: String::new(),
+                filters: vec![],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+        let state = sync.pull().await.unwrap();
+
+        assert_eq!(state.source, "github");
+        assert_eq!(state.last_status, "never");
+        assert_eq!(state.last_error, Some("no token configured".into()));
+    }
+
+    // Task 6.5b — empty filters → ok, no request
+    #[tokio::test]
+    async fn test_pull_empty_filters_ok_no_request() {
+        let db = setup_db().await;
+
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let client = FakeClient {
+            pages: Arc::new(Mutex::new(vec![])),
+            call_count: call_count.clone(),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+        let state = sync.pull().await.unwrap();
+
+        assert_eq!(state.source, "github");
+        assert_eq!(state.last_status, "ok");
+        assert_eq!(call_count.load(Ordering::Relaxed), 0);
+    }
+
+    // Task 6.4 — draft policy filter
+    #[tokio::test]
+    async fn test_pull_draft_policy_filters_out_others_drafts() {
+        let db = setup_db().await;
+
+        let page = GithubPage {
+            prs: vec![
+                fetched_pr(1, false, false), // non-draft, keep
+                fetched_pr(2, true, true),   // draft by me, keep
+                fetched_pr(3, true, false),  // draft by other, drop
+            ],
+            end_cursor: None,
+            has_next_page: false,
+        };
+
+        let client = FakeClient {
+            pages: Arc::new(Mutex::new(vec![page])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![GithubFilter {
+                    repo: Some("org/repo".into()),
+                    ..Default::default()
+                }],
+                exclude_drafts_unless_authored_by_me: true,
+            },
+        );
+        let state = sync.pull().await.unwrap();
+
+        assert_eq!(state.last_status, "ok");
+        let count = pull_request::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 2);
     }
 }

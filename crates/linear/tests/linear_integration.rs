@@ -7,6 +7,24 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 
 use linear::LinearSync;
 
+fn make_issue(linear_id: &str, identifier: &str, title: &str) -> linear::IssueRecord {
+    linear::IssueRecord {
+        linear_id: linear_id.into(),
+        identifier: identifier.into(),
+        title: title.into(),
+        description: None,
+        url: format!("https://linear.test/{linear_id}"),
+        state_name: "Todo".into(),
+        state_type: "triage".into(),
+        priority: None,
+        team_key: None,
+        assignee_name: None,
+        assigned_to_me: false,
+        remote_created_at: None,
+        remote_updated_at: None,
+    }
+}
+
 #[tokio::test]
 async fn test_cursor_put_then_get() {
     let db = setup_db().await;
@@ -89,6 +107,8 @@ async fn test_upsert_issue_inserts_new_row() {
         team_key: Some("ENG".into()),
         assignee_name: Some("Alice".into()),
         assigned_to_me: true,
+        remote_created_at: None,
+        remote_updated_at: None,
     };
 
     let model = linear::sync::upsert_issue(&db, &rec).await.unwrap();
@@ -104,6 +124,47 @@ async fn test_upsert_issue_inserts_new_row() {
     assert_eq!(model.team_key, Some("ENG".into()));
     assert_eq!(model.assignee_name, Some("Alice".into()));
     assert!(model.synced_at.to_string().len() > 0);
+}
+
+#[tokio::test]
+async fn test_upsert_issue_inserts_with_timestamps() {
+    let db = setup_db().await;
+
+    let created = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+        .unwrap()
+        .into();
+    let updated = chrono::DateTime::parse_from_rfc3339("2024-01-02T00:00:00Z")
+        .unwrap()
+        .into();
+
+    let rec = linear::IssueRecord {
+        linear_id: "issue-ts-1".into(),
+        identifier: "PRJ-TS-1".into(),
+        title: "Timestamp Issue".into(),
+        description: None,
+        url: "https://linear.test/issue-ts-1".into(),
+        state_name: "Todo".into(),
+        state_type: "triage".into(),
+        priority: None,
+        team_key: None,
+        assignee_name: None,
+        assigned_to_me: false,
+        remote_created_at: Some(created),
+        remote_updated_at: Some(updated),
+    };
+
+    let model = linear::sync::upsert_issue(&db, &rec).await.unwrap();
+
+    assert_eq!(
+        model.remote_created_at,
+        Some(created),
+        "remote_created_at should be set on insert"
+    );
+    assert_eq!(
+        model.remote_updated_at,
+        Some(updated),
+        "remote_updated_at should be set on insert"
+    );
 }
 
 #[tokio::test]
@@ -123,6 +184,8 @@ async fn test_upsert_issue_updates_existing_row() {
         team_key: None,
         assignee_name: None,
         assigned_to_me: false,
+        remote_created_at: None,
+        remote_updated_at: None,
     };
     let first = linear::sync::upsert_issue(&db, &rec1).await.unwrap();
     let first_id = first.id;
@@ -140,6 +203,8 @@ async fn test_upsert_issue_updates_existing_row() {
         team_key: Some("ENG".into()),
         assignee_name: Some("Bob".into()),
         assigned_to_me: true,
+        remote_created_at: None,
+        remote_updated_at: None,
     };
     let second = linear::sync::upsert_issue(&db, &rec2).await.unwrap();
 
@@ -171,6 +236,8 @@ async fn test_upsert_issue_preserves_dismissed_at_on_update() {
         team_key: None,
         assignee_name: None,
         assigned_to_me: false,
+        remote_created_at: None,
+        remote_updated_at: None,
     };
     linear::sync::upsert_issue(&db, &rec).await.unwrap();
 
@@ -211,6 +278,8 @@ async fn test_upsert_issue_preserves_dismissed_at_on_update() {
         team_key: None,
         assignee_name: None,
         assigned_to_me: false,
+        remote_created_at: None,
+        remote_updated_at: None,
     };
     let updated = linear::sync::upsert_issue(&db, &rec2).await.unwrap();
 
@@ -222,10 +291,82 @@ async fn test_upsert_issue_preserves_dismissed_at_on_update() {
 }
 
 #[tokio::test]
+async fn test_upsert_issue_update_preserves_created_refreshes_updated() {
+    let db = setup_db().await;
+
+    let created = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+        .unwrap()
+        .into();
+    let updated1 = chrono::DateTime::parse_from_rfc3339("2024-01-02T00:00:00Z")
+        .unwrap()
+        .into();
+
+    // Insert with timestamps
+    let rec1 = linear::IssueRecord {
+        linear_id: "issue-ts-update".into(),
+        identifier: "PRJ-TS-U".into(),
+        title: "Original".into(),
+        description: None,
+        url: "https://linear.test/issue-ts-update".into(),
+        state_name: "Todo".into(),
+        state_type: "triage".into(),
+        priority: None,
+        team_key: None,
+        assignee_name: None,
+        assigned_to_me: false,
+        remote_created_at: Some(created),
+        remote_updated_at: Some(updated1),
+    };
+    let first = linear::sync::upsert_issue(&db, &rec1).await.unwrap();
+    assert_eq!(first.remote_created_at, Some(created));
+    assert_eq!(first.remote_updated_at, Some(updated1));
+
+    // Update with a new updated_at
+    let updated2 = chrono::DateTime::parse_from_rfc3339("2024-01-03T00:00:00Z")
+        .unwrap()
+        .into();
+    let rec2 = linear::IssueRecord {
+        linear_id: "issue-ts-update".into(),
+        identifier: "PRJ-TS-U".into(),
+        title: "Updated".into(),
+        description: None,
+        url: "https://linear.test/issue-ts-update".into(),
+        state_name: "InProgress".into(),
+        state_type: "started".into(),
+        priority: None,
+        team_key: None,
+        assignee_name: None,
+        assigned_to_me: false,
+        remote_created_at: Some(created),
+        remote_updated_at: Some(updated2),
+    };
+    let second = linear::sync::upsert_issue(&db, &rec2).await.unwrap();
+
+    // remote_created_at preserved
+    assert_eq!(
+        second.remote_created_at,
+        Some(created),
+        "remote_created_at should be preserved on update"
+    );
+    // remote_updated_at refreshed
+    assert_eq!(
+        second.remote_updated_at,
+        Some(updated2),
+        "remote_updated_at should be refreshed on update"
+    );
+    // dismissed_at stays None (was never set)
+    assert!(second.dismissed_at.is_none());
+}
+
+#[tokio::test]
 async fn test_pull_no_token_marks_never() {
     let db = setup_db().await;
 
-    let svc = linear::sync::new(db.clone(), linear::LinearOptions::default());
+    let svc = linear::sync::new(
+        db.clone(),
+        linear::new_client(String::new(), "http://unused".into()),
+        linear::LinearOptions::default(),
+    );
     let result = svc.pull().await.unwrap();
 
     assert_eq!(result.source, "linear");
@@ -239,6 +380,7 @@ async fn test_pull_with_token_marks_ok() {
 
     let svc = linear::sync::new(
         db.clone(),
+        linear::new_client("fake-token".into(), "http://unused".into()),
         linear::LinearOptions {
             token: "fake-token".into(),
             filters: vec![],
@@ -257,12 +399,10 @@ async fn test_pull_returns_sync_state_model() {
 
     let svc = linear::sync::new(
         db.clone(),
+        linear::new_client("fake".into(), "http://unused".into()),
         linear::LinearOptions {
             token: "fake-token".into(),
-            filters: vec![linear::LinearFilter {
-                team: Some("ENG".into()),
-                ..Default::default()
-            }],
+            filters: vec![],
         },
     );
 

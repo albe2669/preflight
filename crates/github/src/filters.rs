@@ -21,10 +21,16 @@ pub struct FetchedPr {
     pub repo_owner: String,
     pub repo_name: String,
     pub number: i64,
+    pub title: String,
+    pub url: String,
     pub author_login: Option<String>,
+    pub state: String,
     pub is_draft: bool,
+    pub review_requested: bool,
     pub requested_reviewer_teams: Vec<String>,
     pub authored_by_me: bool,
+    pub remote_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub remote_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl GithubFilter {
@@ -128,6 +134,24 @@ pub fn apply_draft_policy(
 mod tests {
     use super::*;
 
+    fn fetched_pr(number: i64, is_draft: bool, authored_by_me: bool) -> FetchedPr {
+        FetchedPr {
+            repo_owner: "o".into(),
+            repo_name: "r".into(),
+            number,
+            title: "".into(),
+            url: "".into(),
+            author_login: Some("u".into()),
+            state: "open".into(),
+            is_draft,
+            review_requested: false,
+            requested_reviewer_teams: vec![],
+            authored_by_me,
+            remote_created_at: None,
+            remote_updated_at: None,
+        }
+    }
+
     // -----------------------------------------------------------------------
     // compile_github_query golden tests
     // -----------------------------------------------------------------------
@@ -221,19 +245,31 @@ mod tests {
                 repo_owner: "org".into(),
                 repo_name: "repo".into(),
                 number: 1,
+                title: "".into(),
+                url: "".into(),
                 author_login: Some("alice".into()),
+                state: "open".into(),
                 is_draft: false,
+                review_requested: false,
                 requested_reviewer_teams: vec!["ai-agents".into(), "core".into()],
                 authored_by_me: false,
+                remote_created_at: None,
+                remote_updated_at: None,
             },
             FetchedPr {
                 repo_owner: "org".into(),
                 repo_name: "repo".into(),
                 number: 2,
+                title: "".into(),
+                url: "".into(),
                 author_login: Some("bob".into()),
+                state: "open".into(),
                 is_draft: false,
+                review_requested: false,
                 requested_reviewer_teams: vec!["core".into()],
                 authored_by_me: false,
+                remote_created_at: None,
+                remote_updated_at: None,
             },
         ];
         let got = apply_team_exclusion(prs, &["ai-agents".into()]);
@@ -247,10 +283,16 @@ mod tests {
             repo_owner: "org".into(),
             repo_name: "repo".into(),
             number: 1,
+            title: "".into(),
+            url: "".into(),
             author_login: None,
+            state: "open".into(),
             is_draft: false,
+            review_requested: false,
             requested_reviewer_teams: vec!["core".into()],
             authored_by_me: false,
+            remote_created_at: None,
+            remote_updated_at: None,
         }];
         let got = apply_team_exclusion(prs, &["ai-agents".into()]);
         assert_eq!(got.len(), 1);
@@ -260,35 +302,11 @@ mod tests {
     fn test_apply_draft_policy_on_keeps_non_draft_and_my_drafts() {
         let prs = vec![
             // non-draft, keep
-            FetchedPr {
-                repo_owner: "o".into(),
-                repo_name: "r".into(),
-                number: 1,
-                author_login: None,
-                is_draft: false,
-                requested_reviewer_teams: vec![],
-                authored_by_me: false,
-            },
+            fetched_pr(1, false, false),
             // draft by me, keep
-            FetchedPr {
-                repo_owner: "o".into(),
-                repo_name: "r".into(),
-                number: 2,
-                author_login: Some("me".into()),
-                is_draft: true,
-                requested_reviewer_teams: vec![],
-                authored_by_me: true,
-            },
+            fetched_pr(2, true, true),
             // draft by someone else, drop
-            FetchedPr {
-                repo_owner: "o".into(),
-                repo_name: "r".into(),
-                number: 3,
-                author_login: Some("other".into()),
-                is_draft: true,
-                requested_reviewer_teams: vec![],
-                authored_by_me: false,
-            },
+            fetched_pr(3, true, false),
         ];
         let got = apply_draft_policy(prs, true);
         assert_eq!(got.len(), 2);
@@ -298,26 +316,7 @@ mod tests {
 
     #[test]
     fn test_apply_draft_policy_off_keeps_all() {
-        let prs = vec![
-            FetchedPr {
-                repo_owner: "o".into(),
-                repo_name: "r".into(),
-                number: 1,
-                author_login: None,
-                is_draft: false,
-                requested_reviewer_teams: vec![],
-                authored_by_me: false,
-            },
-            FetchedPr {
-                repo_owner: "o".into(),
-                repo_name: "r".into(),
-                number: 2,
-                author_login: Some("other".into()),
-                is_draft: true,
-                requested_reviewer_teams: vec![],
-                authored_by_me: false,
-            },
-        ];
+        let prs = vec![fetched_pr(1, false, false), fetched_pr(2, true, false)];
         let got = apply_draft_policy(prs, false);
         assert_eq!(got.len(), 2);
     }

@@ -3,6 +3,7 @@
 mod common;
 
 use chrono::Utc;
+use github::client::{GithubApiClient, GithubPage, new_client};
 use github::cursor;
 use github::entity::enums::PullRequestState;
 use github::sync::{GithubOptions, GithubSync, PrRecord, new};
@@ -10,6 +11,13 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
     Set,
 };
+
+use std::sync::Arc;
+
+/// Build a no-op client — never called by these integration tests.
+fn noop_client() -> Arc<dyn GithubApiClient> {
+    Arc::new(new_client(String::new(), String::new()))
+}
 
 // ---------------------------------------------------------------------------
 // cursor tests
@@ -98,6 +106,8 @@ fn make_pr(provider: &str, owner: &str, repo: &str, number: i64, title: &str) ->
         state: PullRequestState::Open,
         review_requested: true,
         authored_by_me: false,
+        remote_created_at: None,
+        remote_updated_at: None,
     }
 }
 
@@ -169,6 +179,98 @@ async fn test_upsert_pr_preserves_dismissed_at_on_update() {
 }
 
 // ---------------------------------------------------------------------------
+// timestamp tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_upsert_pr_insert_with_timestamps() {
+    let db = common::setup_db().await;
+
+    let created = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let updated = chrono::DateTime::parse_from_rfc3339("2024-01-02T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let rec = PrRecord {
+        remote_created_at: Some(created),
+        remote_updated_at: Some(updated),
+        ..make_pr("github", "preflight", "preflight", 42, "Fix login")
+    };
+    let model = github::sync::upsert_pr(&db, &rec).await.unwrap();
+
+    assert_eq!(
+        model.remote_created_at,
+        Some(chrono::DateTime::from(created))
+    );
+    assert_eq!(
+        model.remote_updated_at,
+        Some(chrono::DateTime::from(updated))
+    );
+}
+
+#[tokio::test]
+async fn test_upsert_pr_update_refreshes_updated_preserves_created_and_dismissed() {
+    let db = common::setup_db().await;
+
+    let created = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let updated1 = chrono::DateTime::parse_from_rfc3339("2024-01-02T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+
+    // Insert with timestamps
+    let rec1 = PrRecord {
+        remote_created_at: Some(created),
+        remote_updated_at: Some(updated1),
+        ..make_pr("github", "preflight", "preflight", 42, "Original")
+    };
+    let inserted = github::sync::upsert_pr(&db, &rec1).await.unwrap();
+
+    // Set dismissed_at
+    let dismissed = Utc::now().into();
+    let pr = github::entity::pull_request::Entity::find()
+        .filter(github::entity::pull_request::Column::Provider.eq("github"))
+        .filter(github::entity::pull_request::Column::Owner.eq("preflight"))
+        .filter(github::entity::pull_request::Column::Repo.eq("preflight"))
+        .filter(github::entity::pull_request::Column::Number.eq(42))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut am = pr.into_active_model();
+    am.dismissed_at = Set(Some(dismissed));
+    am.update(&db).await.unwrap();
+
+    // Update with new remote_updated_at
+    let updated2 = chrono::DateTime::parse_from_rfc3339("2024-01-03T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let rec2 = PrRecord {
+        title: "Updated".into(),
+        remote_updated_at: Some(updated2),
+        ..make_pr("github", "preflight", "preflight", 42, "Updated")
+    };
+    let updated = github::sync::upsert_pr(&db, &rec2).await.unwrap();
+
+    // remote_created_at preserved
+    assert_eq!(
+        updated.remote_created_at,
+        Some(chrono::DateTime::from(created))
+    );
+    // remote_updated_at refreshed
+    assert_eq!(
+        updated.remote_updated_at,
+        Some(chrono::DateTime::from(updated2))
+    );
+    // dismissed_at preserved
+    assert_eq!(updated.dismissed_at, Some(dismissed));
+    // same row updated
+    assert_eq!(updated.id, inserted.id);
+}
+
+// ---------------------------------------------------------------------------
 // pull stub tests
 // ---------------------------------------------------------------------------
 
@@ -176,7 +278,7 @@ async fn test_upsert_pr_preserves_dismissed_at_on_update() {
 async fn test_pull_no_token_marks_never() {
     let db = common::setup_db().await;
 
-    let sync = new(db.clone(), GithubOptions::default());
+    let sync = new(db.clone(), noop_client(), GithubOptions::default());
     let state = sync.pull().await.unwrap();
 
     assert_eq!(state.source, "github");
@@ -190,6 +292,7 @@ async fn test_pull_with_token_marks_ok() {
 
     let sync = new(
         db.clone(),
+        noop_client(),
         GithubOptions {
             token: "fake-token".into(),
             filters: vec![],
@@ -209,6 +312,7 @@ async fn test_pull_returns_sync_state_model() {
 
     let sync = new(
         db.clone(),
+        noop_client(),
         GithubOptions {
             token: "fake".into(),
             filters: vec![],
