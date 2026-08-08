@@ -111,11 +111,25 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         ));
         let mut no_match_items = vec![ListItem::new(no_match)];
         no_match_items.extend(trailing);
-        frame::render_grouped_list(f, area, &[], app.cursor, &carried_ids, no_match_items);
+        frame::render_grouped_list(
+            f,
+            area,
+            &[],
+            filtered.get(app.cursor).copied(),
+            &carried_ids,
+            no_match_items,
+        );
         return;
     }
 
-    frame::render_grouped_list(f, area, &groups, app.cursor, &carried_ids, trailing);
+    frame::render_grouped_list(
+        f,
+        area,
+        &groups,
+        filtered.get(app.cursor).copied(),
+        &carried_ids,
+        trailing,
+    );
 }
 
 pub(crate) async fn handle_navigate(
@@ -259,6 +273,85 @@ mod render_tests {
             })
             .unwrap();
         buffer_text(terminal.backend().buffer())
+    }
+
+    /// Return the title of the todo row that carries the cursor glyph (the
+    /// highlighted row), if a unique one exists.
+    fn cursor_row_title(buf: &str) -> Option<&str> {
+        buf.lines().find_map(|l| {
+            if l.contains(Glyph::CURSOR) {
+                // Format: "  ▌  ○ <title>..."
+                Some(
+                    l.split(Glyph::STATUS_TODO)
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim_start(),
+                )
+            } else {
+                None
+            }
+        })
+    }
+
+    #[test]
+    fn test_cursor_maps_to_plan_index_not_group_index() {
+        // The plan is position-ordered: [A(todo), B(started)]. Status groups
+        // render [started, todo], so group row 0 is B while plan index 0 is A.
+        // Cursor indexes the PLAN, so cursor 0 must highlight A — never the
+        // group-order first row. This is the regression a todo create
+        // triggers: the fresh "todo" lands at the tail while a "started" row
+        // above it stays in an earlier group, scrambling the naive mapping.
+        let mut app = App {
+            cursor: 0,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "PlanA", "todo"), None),
+                    make_plan_row(2, 1, make_todo(2, "PlanB", "started"), None),
+                ],
+                todos: vec![
+                    make_todo(1, "PlanA", "todo"),
+                    make_todo(2, "PlanB", "started"),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let buf = render_today(&mut app);
+        let title = cursor_row_title(&buf).unwrap_or("<none>");
+        assert_eq!(
+            title, "PlanA",
+            "cursor 0 should highlight today_plan()[0]='PlanA' (group row 0 is PlanB):\n{buf}"
+        );
+    }
+    #[test]
+    fn test_cursor_highlights_correct_row_across_groups() {
+        // must highlight the matching todo row despite the interleaved group
+        // headers, blank separators, and the trailing inline-create prompt.
+        let mut app = App {
+            cursor: 1,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "Started", "started"), None),
+                    make_plan_row(2, 1, make_todo(2, "TodoTwo", "todo"), None),
+                    make_plan_row(3, 2, make_todo(3, "TodoThree", "todo"), None),
+                ],
+                todos: vec![
+                    make_todo(1, "Started", "started"),
+                    make_todo(2, "TodoTwo", "todo"),
+                    make_todo(3, "TodoThree", "todo"),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let buf = render_today(&mut app);
+        let title = cursor_row_title(&buf).unwrap_or("<none>");
+        assert_eq!(
+            title, "TodoTwo",
+            "cursor 1 should highlight today_plan()[1], got '{title}':\n{buf}"
+        );
     }
 
     #[test]

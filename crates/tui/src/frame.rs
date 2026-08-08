@@ -201,6 +201,15 @@ fn status_hints(app: &App) -> String {
         (_, crate::app::Mode::StatusSelect { .. }) => {
             "j/k move  1-5 select  enter commit  esc cancel".into()
         }
+        (
+            _,
+            crate::app::Mode::SidebarEdit {
+                input_active: true, ..
+            },
+        ) => "enter save field · esc back to fields · # tag".into(),
+        (_, crate::app::Mode::SidebarEdit { .. }) => {
+            "tab/j next field · shift-tab/k prev · enter edit · esc close · ? keys".into()
+        }
         (_, crate::app::Mode::Help { .. }) => "type to filter · esc close".into(),
         (View::Today, _) => {
             "j/k move  SPC status  a add  e edit  enter detail  D done  ? keys".into()
@@ -461,42 +470,28 @@ pub fn group_by_status<'a>(rows: &'a [&'a Todo], show_done: bool) -> Vec<Grouped
     groups
 }
 
-/// Render the grouped list into `area` as a stateful `List` widget. The
-/// `cursor` selects the highlighted row; `show_done` controls the done
-/// group expansion. The inline-create prompt (if any) and per-view hints
-/// are appended by the caller via `trailing_items`.
+/// Render the grouped list into `area` as a stateful `List` widget.
+///
+/// `cursor_todo` is the todo the cursor points at in the *source-ordered*
+/// list (the same order the caller built `groups` from). Groups reorder rows
+/// by status, so the highlight must be located by todo identity, never by
+/// positional index. The inline-create prompt (if any) and per-view hints are
+/// appended by the caller via `trailing_items`.
 pub fn render_grouped_list<'a>(
     f: &mut Frame,
     area: Rect,
     groups: &[GroupedSection<'a>],
-    cursor: usize,
+    cursor_todo: Option<&Todo>,
     carried_ids: &std::collections::HashSet<i32>,
     trailing_items: Vec<ListItem<'a>>,
 ) -> ListState {
-    // Map each todo-row index to its flat List index. Group headers,
-    // blocked-reason continuations, blank separators, and trailing items
-    // interleave with todo rows, so List selection must use flat indices —
-    // the cursor is a todo-row index and cannot select directly.
-    let mut todo_flat: Vec<usize> = Vec::new();
-    let mut flat: usize = 0;
-    for group in groups {
-        flat += 1; // group header
-        if group.collapsed {
-            continue;
-        }
-        for todo in group.rows.iter() {
-            todo_flat.push(flat);
-            flat += 1;
-            if todo.status == "blocked" && todo.blocked_reason.is_some() {
-                flat += 1; // blocked-reason continuation line
-            }
-        }
-        flat += 1; // blank separator
-    }
-    let selected_flat = todo_flat.get(cursor).copied();
+    let cursor_id = cursor_todo.map(|t| t.id);
 
+    // Build the grouped items and, in the same pass, record the flat List
+    // index that carries the cursor's todo (matched by id).
     let mut items: Vec<ListItem<'a>> = Vec::new();
-    let mut row_idx: usize = 0;
+    let mut selected_flat: Option<usize> = None;
+    let mut flat: usize = 0;
 
     for group in groups {
         let collapsed = group.collapsed;
@@ -513,28 +508,34 @@ pub fn render_grouped_list<'a>(
             header,
             Style::default().fg(Palette::DIM),
         ))));
+        flat += 1;
 
         if collapsed {
             continue;
         }
 
         for todo in group.rows.iter() {
-            let is_cursor = row_idx == cursor;
+            let is_cursor = cursor_id == Some(todo.id);
+            if is_cursor {
+                selected_flat = Some(flat);
+            }
             let line = grouped_todo_line(todo, is_cursor, carried_ids.contains(&todo.id));
             if is_cursor {
                 items.push(ListItem::new(line).style(Style::default().bg(Palette::ROW_HIGHLIGHT)));
             } else {
                 items.push(ListItem::new(line));
             }
+            flat += 1;
             // Blocked reason continuation line.
             if todo.status == "blocked" {
                 if let Some(reason) = &todo.blocked_reason {
                     items.push(ListItem::new(blocked_reason_line(reason)));
+                    flat += 1;
                 }
             }
-            row_idx += 1;
         }
         items.push(ListItem::new(Line::from("")));
+        flat += 1;
     }
 
     items.extend(trailing_items);
@@ -954,20 +955,6 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         )));
     }
 
-    // Footer hints
-    lines.push(Line::from(""));
-    if input_active {
-        lines.push(Line::from(Span::styled(
-            "Enter: save · Esc: cancel",
-            Style::default().fg(Palette::GHOST),
-        )));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "Tab/j: next · k: prev · Enter: edit · Esc: done",
-            Style::default().fg(Palette::GHOST),
-        )));
-    }
-
     f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
 }
 
@@ -1005,6 +992,58 @@ mod tests {
         split_content, status_glyph,
     };
     use crate::theme::{Glyph, Palette};
+
+    use crate::app::{App, Mode, SidebarField};
+
+    // -- status_hints tests --
+
+    #[test]
+    fn test_status_hints_sidebar_edit_inactive_shows_field_nav() {
+        let mut app = App::default();
+        app.mode = Mode::SidebarEdit {
+            id: 1,
+            field: SidebarField::Title,
+            input_active: false,
+            title_input: String::new(),
+            desc_input: String::new(),
+            desc_scroll: 0,
+            tag_input: String::new(),
+            link_kind: crate::app::LinkKind::Pr,
+            link_selection: 0,
+            scroll: 0,
+        };
+        let hints = crate::frame::status_hints(&app);
+        assert!(
+            hints.contains("enter edit"),
+            "inactive sidebar should hint how to edit a field: {hints}"
+        );
+        assert!(
+            hints.contains("tab/j"),
+            "inactive sidebar should hint field navigation: {hints}"
+        );
+    }
+
+    #[test]
+    fn test_status_hints_sidebar_edit_active_shows_save() {
+        let mut app = App::default();
+        app.mode = Mode::SidebarEdit {
+            id: 1,
+            field: SidebarField::Title,
+            input_active: true,
+            title_input: String::new(),
+            desc_input: String::new(),
+            desc_scroll: 0,
+            tag_input: String::new(),
+            link_kind: crate::app::LinkKind::Pr,
+            link_selection: 0,
+            scroll: 0,
+        };
+        let hints = crate::frame::status_hints(&app);
+        assert!(
+            hints.contains("enter save field"),
+            "active sidebar should hint how to save a field: {hints}"
+        );
+    }
 
     // -- status_glyph tests --
 
@@ -1346,7 +1385,7 @@ mod render_tests {
 
     use crate::app::tests::make_todo;
     use crate::app::{App, Mode, View};
-    use crate::gql::SyncState;
+    use crate::gql::{SyncState, Todo};
     use crate::test_support::buffer_text;
     use crate::theme::{Glyph, Palette};
 
@@ -1365,7 +1404,10 @@ mod render_tests {
 
     /// Render with the shared grouped-list renderer, returning the text of
     /// every row whose background carries the row-highlight color.
-    fn highlighted_grouped_rows(groups: Vec<GroupedSection<'_>>, cursor: usize) -> Vec<String> {
+    fn highlighted_grouped_rows<'a>(
+        groups: Vec<GroupedSection<'a>>,
+        cursor_todo: Option<&Todo>,
+    ) -> Vec<String> {
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
@@ -1374,7 +1416,7 @@ mod render_tests {
                     f,
                     f.area(),
                     &groups,
-                    cursor,
+                    cursor_todo,
                     &std::collections::HashSet::new(),
                     vec![],
                 );
@@ -1414,9 +1456,9 @@ mod render_tests {
             },
         ];
 
-        // cursor 1 = the second todo row. The STARTED header occupies flat
-        // index 0, so the highlight must land on flat index 2, not 1.
-        let rows = highlighted_grouped_rows(groups, 1);
+        // The STARTED header occupies flat index 0, so the highlight must
+        // land on the cursor's todo (second) regardless of position.
+        let rows = highlighted_grouped_rows(groups, Some(&second));
         assert_eq!(
             rows.len(),
             1,
@@ -1459,7 +1501,7 @@ mod render_tests {
         // header, group separators, and the collapsed DONE header all consume
         // visual lines, so the highlight must still land on the TODO row and
         // nowhere else — in particular not on any header line.
-        let rows = highlighted_grouped_rows(groups, 1);
+        let rows = highlighted_grouped_rows(groups, Some(&todo));
         assert_eq!(
             rows.len(),
             1,

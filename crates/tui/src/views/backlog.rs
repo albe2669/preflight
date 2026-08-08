@@ -4,7 +4,7 @@
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use tokio::sync::mpsc;
@@ -30,19 +30,52 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     let groups = frame::group_by_status(&filtered, app.show_done);
 
+    // Inline-create prompt (a add). Matches Today's layout so the prompt is
+    // visible at the bottom of the backlog list.
+    let create_line = match &app.mode {
+        Mode::InlineCreate { input } => Line::from(vec![
+            Span::styled("  add ", Style::default().fg(Palette::ACCENT)),
+            Span::styled(
+                if input.is_empty() {
+                    "what else is on your mind?".to_string()
+                } else {
+                    format!("{input}▏")
+                },
+                Style::default()
+                    .bg(Palette::ROW_HIGHLIGHT)
+                    .fg(if input.is_empty() {
+                        Palette::GHOST
+                    } else {
+                        Palette::TEXT
+                    })
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+        ]),
+        _ => Line::from(vec![
+            Span::styled("  add ", Style::default().fg(Palette::ACCENT)),
+            Span::styled(
+                "what else is on your mind?",
+                Style::default().fg(Palette::GHOST),
+            ),
+        ]),
+    };
+    let trailing = vec![ListItem::new(create_line)];
+
     // No-matches line when the filter yields zero rows.
     if !filter.is_empty() && filtered.is_empty() {
         let no_match = ListItem::new(Line::from(Span::styled(
             format!("  no matches for \"{filter}\""),
             Style::default().fg(Palette::DIM),
         )));
+        let mut items = vec![no_match];
+        items.extend(trailing);
         frame::render_grouped_list(
             f,
             area,
             &[],
-            app.cursor,
+            filtered.get(app.cursor).copied(),
             &std::collections::HashSet::new(),
-            vec![no_match],
+            items,
         );
         return;
     }
@@ -51,9 +84,9 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         f,
         area,
         &groups,
-        app.cursor,
+        filtered.get(app.cursor).copied(),
         &std::collections::HashSet::new(),
-        vec![],
+        trailing,
     );
 }
 
@@ -211,6 +244,31 @@ mod render_tests {
         assert!(
             !output.contains("Done task"),
             "Done todo title should NOT appear when done group is collapsed"
+        );
+    }
+
+    #[test]
+    fn test_backlog_renders_inline_create_prompt_in_navigate_mode() {
+        let mut app = App::default();
+        let output = render_backlog(&mut app);
+        assert!(
+            output.contains("what else is on your mind?"),
+            "backlog should show the inline-create placeholder:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_backlog_renders_active_inline_create_input() {
+        let mut app = App {
+            mode: crate::app::Mode::InlineCreate {
+                input: "new backlog task".to_string(),
+            },
+            ..Default::default()
+        };
+        let output = render_backlog(&mut app);
+        assert!(
+            output.contains("new backlog task"),
+            "backlog should render the active create input:\n{output}"
         );
     }
 }

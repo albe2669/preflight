@@ -119,10 +119,6 @@ const TODAY_KEYS: &[KeybindRow] = &[
         desc: "add todo (inline)",
     },
     KeybindRow {
-        key: "r",
-        desc: "edit title (inline)",
-    },
-    KeybindRow {
         key: "e/Enter",
         desc: "sidebar edit",
     },
@@ -182,12 +178,30 @@ const BACKLOG_KEYS: &[KeybindRow] = &[
         desc: "add todo (inline)",
     },
     KeybindRow {
-        key: "r",
-        desc: "edit title (inline)",
-    },
-    KeybindRow {
         key: "e/Enter",
         desc: "sidebar edit",
+    },
+];
+const SIDEBAR_KEYS: &[KeybindRow] = &[
+    KeybindRow {
+        key: "Tab/j",
+        desc: "next field",
+    },
+    KeybindRow {
+        key: "Shift-Tab/k",
+        desc: "previous field",
+    },
+    KeybindRow {
+        key: "Enter",
+        desc: "edit / save current field",
+    },
+    KeybindRow {
+        key: "Esc",
+        desc: "leave field / close the edit form",
+    },
+    KeybindRow {
+        key: "#",
+        desc: "add a tag to the current todo",
     },
 ];
 
@@ -203,6 +217,10 @@ const HELP_SECTIONS: &[KeybindSection] = &[
     KeybindSection {
         title: "Backlog",
         rows: BACKLOG_KEYS,
+    },
+    KeybindSection {
+        title: "Sidebar edit",
+        rows: SIDEBAR_KEYS,
     },
 ];
 
@@ -234,31 +252,12 @@ fn filter_keybinds<'a>(filter: &str) -> Vec<(&'a str, Vec<&'a KeybindRow>)> {
 
 fn render_help(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+    use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
     let filter = match &app.mode {
         Mode::Help { filter } => filter.clone(),
         _ => String::new(),
     };
-
-    let width = 56.min(area.width);
-    let height = 24.min(area.height);
-    let x = area.x + (area.width - width) / 2;
-    let y = area.y + (area.height - height) / 2;
-    let rect = ratatui::layout::Rect::new(x, y, width, height);
-
-    f.render_widget(Clear, rect);
-
-    let title = if filter.is_empty() {
-        " KEYS ".to_string()
-    } else {
-        format!(" KEYS · {filter} ")
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Palette::ACCENT))
-        .title(Span::styled(title, Style::default().fg(Palette::ACCENT)));
-    f.render_widget(block, rect);
 
     let sections = filter_keybinds(&filter);
     let mut lines: Vec<Line> = Vec::new();
@@ -286,13 +285,33 @@ fn render_help(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
     }
 
-    let inner = ratatui::layout::Rect::new(x + 1, y + 1, width - 2, height - 2);
-    f.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((app.help_scroll as u16, 0)),
-        inner,
-    );
+    // Size the box to its content (so it never shows a big blank region),
+    // capped to the available screen height. Scroll only over the overflow.
+    let width = 56.min(area.width);
+    let content_inner = lines.len() as u16;
+    let height = (content_inner + 2).min(area.height);
+    let inner_height = height.saturating_sub(2);
+    let max_scroll = (content_inner as usize).saturating_sub(inner_height as usize);
+    let scroll = app.help_scroll.min(max_scroll);
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y + (area.height - height) / 2;
+    let rect = ratatui::layout::Rect::new(x, y, width, height);
+
+    f.render_widget(Clear, rect);
+
+    let title = if filter.is_empty() {
+        " KEYS ".to_string()
+    } else {
+        format!(" KEYS · {filter} ")
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::ACCENT))
+        .title(Span::styled(title, Style::default().fg(Palette::ACCENT)));
+    f.render_widget(block, rect);
+
+    let inner = ratatui::layout::Rect::new(x + 1, y + 1, width - 2, inner_height);
+    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
 }
 
 fn render_confirm(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -771,7 +790,7 @@ pub(crate) async fn handle_sidebar_edit(
     if !input_active {
         // Field navigation mode
         match key {
-            Char('\t') | Char('j') => {
+            Tab | Char('j') => {
                 let next_field = match field {
                     SidebarField::Title => SidebarField::Description,
                     SidebarField::Description => SidebarField::Links,
@@ -955,7 +974,7 @@ pub(crate) async fn handle_sidebar_edit(
             }
             SidebarField::Links => {
                 match key {
-                    Char('\t') => {
+                    Tab => {
                         if let Mode::SidebarEdit {
                             link_kind,
                             link_selection,
@@ -1417,10 +1436,11 @@ mod tests {
     #[test]
     fn test_filter_keybinds_empty_returns_all() {
         let sections = filter_keybinds("");
-        assert_eq!(sections.len(), 3);
+        assert_eq!(sections.len(), 4);
         assert_eq!(sections[0].0, "Global");
         assert_eq!(sections[1].0, "Today");
         assert_eq!(sections[2].0, "Backlog");
+        assert_eq!(sections[3].0, "Sidebar edit");
     }
 
     #[test]
@@ -1458,8 +1478,11 @@ mod tests {
         let lower = filter_keybinds("tab");
         let upper = filter_keybinds("TAB");
         assert_eq!(lower.len(), upper.len());
-        assert_eq!(lower.len(), 1);
-        assert_eq!(lower[0].0, "Global");
+        // "tab" matches the Global view-switch binding and the Sidebar edit
+        // field-nav binding.
+        assert_eq!(lower.len(), 2);
+        assert!(lower.iter().any(|(t, _)| *t == "Global"));
+        assert!(lower.iter().any(|(t, _)| *t == "Sidebar edit"));
     }
 
     // -- tag_commit_is_removal (sidebar tag removal) --
@@ -1570,6 +1593,49 @@ mod render_tests {
         assert!(output.contains("Global"), "should show Global section");
         assert!(output.contains("quit the app"), "should show quit keybind");
         assert!(output.contains("move cursor"), "should show j/k keybind");
+        assert!(
+            output.contains("Sidebar edit"),
+            "should show Sidebar edit section"
+        );
+        assert!(
+            output.contains("edit / save current field"),
+            "should show sidebar edit/save keybind"
+        );
+    }
+
+    #[test]
+    fn test_help_overlay_does_not_overflow_blank_when_scrolled() {
+        let mut app = App {
+            view: View::Today,
+            mode: Mode::Help {
+                filter: String::new(),
+            },
+            help_scroll: 100, // far past the content
+            ..Default::default()
+        };
+        let output = render_full(&mut app);
+        // The box must render all four sections without being blanked out by
+        // an unbounded scroll; the last section's keybind must still render.
+        assert!(
+            output.contains("add a tag to the current todo"),
+            "last help row should still be visible after clamped scroll:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_help_overlay_sidebar_section_when_filtering() {
+        let mut app = App {
+            view: View::Today,
+            mode: Mode::Help {
+                filter: "field".to_string(),
+            },
+            ..Default::default()
+        };
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("Sidebar edit"),
+            "filtering by 'sidebar' should surface the Sidebar edit section:\n{output}"
+        );
     }
 
     #[test]
@@ -1858,7 +1924,7 @@ mod sidebar_edit_tests {
 
         // Description -> Links
         let (client, _) = test_client();
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { field, .. } = &app.mode {
@@ -1868,7 +1934,7 @@ mod sidebar_edit_tests {
         }
 
         // Links -> Tags
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { field, .. } = &app.mode {
@@ -1878,7 +1944,7 @@ mod sidebar_edit_tests {
         }
 
         // Tags -> Title (wraps)
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { field, .. } = &app.mode {
@@ -1888,7 +1954,7 @@ mod sidebar_edit_tests {
         }
 
         // Title -> Description (wraps)
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { field, .. } = &app.mode {
@@ -1961,7 +2027,7 @@ mod sidebar_edit_tests {
             *scroll = 5;
         }
         let (client, _) = test_client();
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { scroll, .. } = &app.mode {
@@ -2163,10 +2229,10 @@ mod sidebar_edit_tests {
         let (client, _) = test_client();
 
         // Nav to Tags
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         // Activate input
@@ -2195,10 +2261,10 @@ mod sidebar_edit_tests {
         let (client, _) = test_client();
 
         // Nav to Tags
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
@@ -2237,10 +2303,10 @@ mod sidebar_edit_tests {
         enter_sidebar_edit(&mut app);
         let (client, _) = test_client();
 
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
@@ -2269,7 +2335,7 @@ mod sidebar_edit_tests {
         let (client, _) = test_client();
 
         // Nav to Links
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         // Activate
@@ -2294,7 +2360,7 @@ mod sidebar_edit_tests {
         enter_sidebar_edit(&mut app);
         let (client, _) = test_client();
 
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
@@ -2317,7 +2383,7 @@ mod sidebar_edit_tests {
         enter_sidebar_edit(&mut app);
         let (client, _) = test_client();
 
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
@@ -2344,7 +2410,7 @@ mod sidebar_edit_tests {
         }
         let (client, _) = test_client();
 
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
@@ -2368,7 +2434,7 @@ mod sidebar_edit_tests {
         let (client, _) = test_client();
 
         // Nav to Links
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
@@ -2379,7 +2445,7 @@ mod sidebar_edit_tests {
             "default link kind should be Pr"
         );
         // Tab within links input toggles kind
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { link_kind, .. } = &app.mode {
@@ -2388,7 +2454,7 @@ mod sidebar_edit_tests {
             panic!("expected SidebarEdit");
         }
         // Tab again wraps back to Pr
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { link_kind, .. } = &app.mode {
@@ -2405,7 +2471,7 @@ mod sidebar_edit_tests {
         enter_sidebar_edit(&mut app);
         let (client, _) = test_client();
 
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
@@ -2427,7 +2493,7 @@ mod sidebar_edit_tests {
         enter_sidebar_edit(&mut app);
         let (client, _) = test_client();
 
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\t'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
             .await
             .unwrap();
         super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
