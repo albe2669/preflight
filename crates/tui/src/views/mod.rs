@@ -865,7 +865,7 @@ pub(crate) async fn handle_sidebar_edit(
                             title_input.push(c);
                         }
                     }
-                    Char('\n') => {
+                    Enter => {
                         // Commit title: update_todo(id, Some(title), None).
                         let title = title_input.trim().to_string();
                         let c = client.clone();
@@ -929,7 +929,7 @@ pub(crate) async fn handle_sidebar_edit(
                             desc_input.push(c);
                         }
                     }
-                    Char('\n') => {
+                    Enter => {
                         // Commit description
                         let desc = desc_input.clone();
                         let c = client.clone();
@@ -2139,7 +2139,7 @@ mod sidebar_edit_tests {
             .unwrap();
         assert!(matches!(&app.mode, Mode::SidebarEdit { input_active, .. } if *input_active));
         // Commit with Enter
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\n'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
             .await
             .unwrap();
         assert!(
@@ -2826,7 +2826,7 @@ mod sidebar_edit_tests {
         super::handle_sidebar_edit(&mut app, KeyCode::Char('e'), &client, &tx)
             .await
             .unwrap();
-        super::handle_sidebar_edit(&mut app, KeyCode::Char('\n'), &client, &tx)
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
             .await
             .unwrap();
         if let Mode::SidebarEdit { input_active, .. } = &app.mode {
