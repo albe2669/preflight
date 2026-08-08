@@ -2698,6 +2698,32 @@ mod sidebar_edit_tests {
     }
 
     #[test]
+    fn test_read_only_sidebar_shows_description() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        app.data.plan[0].todo.as_mut().unwrap().description = Some("detailed notes".to_string());
+        app.data.todos[0].description = Some("detailed notes".to_string());
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("detailed notes"),
+            "read-only sidebar should show the todo description:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_omits_empty_description() {
+        // No description set — the read-only sidebar must not render an empty
+        // description block (make_todo leaves description None).
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("My Task"),
+            "todo title should still render:\n{output}"
+        );
+    }
+
+    #[test]
     fn test_edit_form_shows_no_linked_prs_when_empty() {
         let mut app = setup_app_with_todo();
         enter_sidebar_edit(&mut app);

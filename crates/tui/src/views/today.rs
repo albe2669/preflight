@@ -279,14 +279,18 @@ mod render_tests {
     /// highlighted row), if a unique one exists.
     fn cursor_row_title(buf: &str) -> Option<&str> {
         buf.lines().find_map(|l| {
-            if l.contains(Glyph::CURSOR) {
-                // Format: "  ▌  ○ <title>..."
-                Some(
-                    l.split(Glyph::STATUS_TODO)
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim_start(),
-                )
+            if let Some(idx) = l.find(Glyph::CURSOR) {
+                let after = &l[idx + Glyph::CURSOR.len_utf8()..];
+                // Strip leading spaces and any status glyph, then the space.
+                let t = after.trim_start();
+                let t = t.trim_start_matches([
+                    Glyph::STATUS_TODO,
+                    Glyph::STATUS_STARTED,
+                    Glyph::STATUS_BLOCKED,
+                    Glyph::STATUS_DONE,
+                    Glyph::STATUS_CANCELLED,
+                ]);
+                Some(t.trim_start())
             } else {
                 None
             }
@@ -294,13 +298,11 @@ mod render_tests {
     }
 
     #[test]
-    fn test_cursor_maps_to_plan_index_not_group_index() {
-        // The plan is position-ordered: [A(todo), B(started)]. Status groups
-        // render [started, todo], so group row 0 is B while plan index 0 is A.
-        // Cursor indexes the PLAN, so cursor 0 must highlight A — never the
-        // group-order first row. This is the regression a todo create
-        // triggers: the fresh "todo" lands at the tail while a "started" row
-        // above it stays in an earlier group, scrambling the naive mapping.
+    fn test_cursor_highlights_display_order_row() {
+        // The plan is position-ordered [A(todo), B(started)], but today_plan()
+        // is display-ordered by status -> [B(started), A(todo)] (status group
+        // order). Grouped progress from start to cursor must match what's
+        // actually on screen, so cursor 0 selects B — the top visual row.
         let mut app = App {
             cursor: 0,
             data: crate::app::AppData {
@@ -320,8 +322,8 @@ mod render_tests {
         let buf = render_today(&mut app);
         let title = cursor_row_title(&buf).unwrap_or("<none>");
         assert_eq!(
-            title, "PlanA",
-            "cursor 0 should highlight today_plan()[0]='PlanA' (group row 0 is PlanB):\n{buf}"
+            title, "PlanB",
+            "cursor 0 should highlight the display-order top row 'PlanB':\n{buf}"
         );
     }
     #[test]

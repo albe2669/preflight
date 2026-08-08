@@ -201,18 +201,30 @@ impl Default for App {
         }
     }
 }
-
 impl App {
-    /// Todos on today's plan (active, not removed), in position order.
-    pub fn today_plan(&self) -> Vec<&Todo> {
-        self.data
-            .plan
-            .iter()
-            .filter(|p| p.removed_at.is_none())
-            .filter_map(|p| p.todo.as_ref())
-            .collect()
+    /// The on-screen (grouped) display order: rows sorted by status in the
+    /// fixed [`STATUS_ORDER`], stable within a status so source order is
+    /// preserved inside a group. Cursor navigation, render highlighting, and
+    /// row actions all treat the cursor as an index into this order, which is
+    /// why it must match how the grouped list walks its rows.
+    fn display_order<'a>(&self, rows: Vec<&'a Todo>) -> Vec<&'a Todo> {
+        let mut rows = rows;
+        rows.sort_by_key(|t| status_index(&t.status).unwrap_or(0));
+        rows
     }
 
+    /// Todos on today's plan (active, not removed), in display (status-grouped)
+    /// order.
+    pub fn today_plan(&self) -> Vec<&Todo> {
+        self.display_order(
+            self.data
+                .plan
+                .iter()
+                .filter(|p| p.removed_at.is_none())
+                .filter_map(|p| p.todo.as_ref())
+                .collect(),
+        )
+    }
     /// Unplanned rows (removed_at set) — the "what did I intend" history.
     pub fn today_unplanned(&self) -> Vec<&crate::gql::PlanRow> {
         self.data
@@ -222,7 +234,8 @@ impl App {
             .collect()
     }
 
-    /// All todos NOT on today's plan, grouped by status for Backlog.
+    /// All todos NOT on today's plan, in display (status-grouped) order for
+    /// Backlog.
     pub fn backlog(&self) -> Vec<&Todo> {
         let on_plan: HashSet<i32> = self
             .data
@@ -232,11 +245,13 @@ impl App {
             .filter_map(|p| p.todo.as_ref())
             .map(|t| t.id)
             .collect();
-        self.data
-            .todos
-            .iter()
-            .filter(|t| !on_plan.contains(&t.id))
-            .collect()
+        self.display_order(
+            self.data
+                .todos
+                .iter()
+                .filter(|t| !on_plan.contains(&t.id))
+                .collect(),
+        )
     }
 
     /// Non-dismissed PRs.
@@ -1030,9 +1045,11 @@ pub(crate) mod tests {
             ..Default::default()
         };
         app.clamp_cursor_to_active();
+        // today_plan() is display-ordered: [started, todo, done]. The first
+        // active row (started) is index 0.
         assert_eq!(
-            app.cursor, 1,
-            "cursor should skip the leading done row to land on the first active row"
+            app.cursor, 0,
+            "cursor should land on the first active (started) row"
         );
     }
 
@@ -1069,8 +1086,9 @@ pub(crate) mod tests {
             ..Default::default()
         };
         app.clamp_cursor_to_active();
-        // backlog() = [done, todo]; the first active row is index 1.
-        assert_eq!(app.cursor, 1);
+        // backlog() is display-ordered: [todo, done]; the first active row
+        // (todo) is index 0.
+        assert_eq!(app.cursor, 0);
     }
 
     #[test]
@@ -1103,5 +1121,57 @@ pub(crate) mod tests {
         };
         app.clamp_cursor_to_active();
         assert_eq!(app.cursor, 0);
+    }
+
+    // -- display order (cursor navigation matches on-screen groups) --
+
+    #[test]
+    fn test_today_plan_is_display_ordered_by_status() {
+        // Position order is [cancelled, started, todo]; display order groups
+        // by status (started, blocked, todo, done, cancelled) so arrow
+        // navigation moves through categories in on-screen order.
+        let app = App {
+            view: View::Today,
+            data: crate::app::AppData {
+                plan: vec![
+                    make_plan_row(1, 0, make_todo(1, "canc", "cancelled"), None),
+                    make_plan_row(2, 1, make_todo(2, "start", "started"), None),
+                    make_plan_row(3, 2, make_todo(3, "tod", "todo"), None),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let titles: Vec<&str> = app.today_plan().iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["start", "tod", "canc"],
+            "today_plan must be display-ordered (started, todo, cancelled)"
+        );
+    }
+
+    #[test]
+    fn test_backlog_is_display_ordered_by_status() {
+        // Fetch order is [todo, started, cancelled]; display order is
+        // [started, todo, cancelled].
+        let app = App {
+            view: View::Backlog,
+            data: crate::app::AppData {
+                plan: vec![],
+                todos: vec![
+                    make_todo(1, "tod", "todo"),
+                    make_todo(2, "start", "started"),
+                    make_todo(3, "canc", "cancelled"),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let titles: Vec<&str> = app.backlog().iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["start", "tod", "canc"],
+            "backlog must be display-ordered (started, todo, cancelled)"
+        );
     }
 }

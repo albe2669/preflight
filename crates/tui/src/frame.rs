@@ -643,7 +643,19 @@ pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
         todo.title.clone(),
         Style::default().fg(Palette::TEXT),
     )));
-    lines.push(Line::from(""));
+    // Description (also shown in the edit form; keep the read-only detail in
+    // sync so a todo's description is visible without entering edit mode).
+    if let Some(desc) = &todo.description {
+        if !desc.trim().is_empty() {
+            for dl in desc.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("  {dl}"),
+                    Style::default().fg(Palette::TEXT),
+                )));
+            }
+            lines.push(Line::from(""));
+        }
+    }
 
     // Tags.
     if !todo.tag.nodes.is_empty() {
