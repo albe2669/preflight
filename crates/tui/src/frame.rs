@@ -739,7 +739,26 @@ pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
         }
     }
 
-    f.render_widget(Paragraph::new(lines), inner);
+    f.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
+        inner,
+    );
+}
+/// Render `text` with a block-cursor caret at byte index `caret`. Used by the
+/// sidebar edit form so the user can see (and move) the insertion point.
+fn text_with_caret(text: &str, caret: usize) -> String {
+    let mut caret = caret.min(text.len());
+    // Clamp to a char boundary so split_at never panics if a caret drifts to
+    // a mid-char byte offset.
+    while caret > 0 && !text.is_char_boundary(caret) {
+        caret -= 1;
+    }
+    let (head, tail) = text.split_at(caret);
+    let mut out = String::with_capacity(text.len() + 4);
+    out.push_str(head);
+    out.push(Glyph::CURSOR);
+    out.push_str(tail);
+    out
 }
 
 /// Render the sidebar edit form when in SidebarEdit mode.
@@ -749,8 +768,11 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         field,
         input_active,
         title_input,
+        title_caret,
         desc_input,
+        desc_caret,
         tag_input,
+        tag_caret,
         link_kind,
         link_selection,
         scroll,
@@ -766,6 +788,9 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     let link_kind = *link_kind;
     let link_selection = *link_selection;
     let scroll = *scroll;
+    let title_caret = *title_caret;
+    let desc_caret = *desc_caret;
+    let tag_caret = *tag_caret;
     let title_input: &str = title_input;
     let desc_input: &str = desc_input;
     let tag_input: &str = tag_input;
@@ -830,7 +855,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     lines.push(Line::from(title_header));
     if input_active && field == crate::app::SidebarField::Title {
         lines.push(Line::from(Span::styled(
-            title_input,
+            text_with_caret(title_input, title_caret),
             Style::default().fg(Palette::TEXT),
         )));
     } else {
@@ -867,7 +892,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     lines.push(Line::from(desc_header));
     if input_active && field == crate::app::SidebarField::Description {
         lines.push(Line::from(Span::styled(
-            desc_input,
+            text_with_caret(desc_input, desc_caret),
             Style::default().fg(Palette::TEXT),
         )));
     } else {
@@ -952,7 +977,11 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         .collect();
     if input_active && field == crate::app::SidebarField::Tags {
         lines.push(Line::from(Span::styled(
-            format!("{} {}▌", tag_strs.join(" "), tag_input),
+            format!(
+                "{} {}",
+                tag_strs.join(" "),
+                text_with_caret(tag_input, tag_caret)
+            ),
             Style::default().fg(Palette::TEXT),
         )));
     } else if tag_strs.is_empty() {
@@ -967,7 +996,12 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         )));
     }
 
-    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((scroll as u16, 0)),
+        inner,
+    );
 }
 
 /// Resolve the highlighted todo for the sidebar: the cursor todo from the
@@ -1017,9 +1051,12 @@ mod tests {
             field: SidebarField::Title,
             input_active: false,
             title_input: String::new(),
+            title_caret: 0,
             desc_input: String::new(),
+            desc_caret: 0,
             desc_scroll: 0,
             tag_input: String::new(),
+            tag_caret: 0,
             link_kind: crate::app::LinkKind::Pr,
             link_selection: 0,
             scroll: 0,
@@ -1043,9 +1080,12 @@ mod tests {
             field: SidebarField::Title,
             input_active: true,
             title_input: String::new(),
+            title_caret: 0,
             desc_input: String::new(),
+            desc_caret: 0,
             desc_scroll: 0,
             tag_input: String::new(),
+            tag_caret: 0,
             link_kind: crate::app::LinkKind::Pr,
             link_selection: 0,
             scroll: 0,

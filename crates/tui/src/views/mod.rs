@@ -732,6 +732,65 @@ pub(crate) fn fetch_detail(
     });
 }
 
+/// Insert `ch` at `caret` into `text`, returning the new caret. The caret is a
+/// byte index; `ch` is a single char.
+fn insert_at_caret(text: &mut String, caret: usize, ch: char) -> usize {
+    let caret = caret.min(text.len());
+    text.insert(caret, ch);
+    caret + ch.len_utf8()
+}
+
+/// Given a byte caret, return the byte index of the start of the char
+/// immediately before it (or 0). MSRV-safe char-boundary walk.
+fn prev_char_start(text: &str, caret: usize) -> usize {
+    text[..caret.min(text.len())]
+        .char_indices()
+        .next_back()
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+/// Given a byte index, return the byte index just past the char starting at or
+/// after it (or `text.len()`). MSRV-safe char-boundary walk.
+fn next_char_start(text: &str, caret: usize) -> usize {
+    if caret >= text.len() {
+        return text.len();
+    }
+    text[caret.min(text.len())..]
+        .chars()
+        .next()
+        .map(|c| caret + c.len_utf8())
+        .unwrap_or(text.len())
+}
+
+/// Delete the char immediately before `caret` (if any), returning the new
+/// caret. Backspace semantics.
+fn backspace_at_caret(text: &mut String, caret: usize) -> usize {
+    let caret = caret.min(text.len());
+    if caret == 0 {
+        return 0;
+    }
+    let idx = text[..caret]
+        .char_indices()
+        .next_back()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    text.replace_range(idx..caret, "");
+    idx
+}
+
+/// Move `caret` one UTF-8 char in `dir` (byte step), clamped to [0, len].
+fn move_caret(text: &str, caret: usize, dir: i8) -> usize {
+    if dir < 0 {
+        if caret == 0 {
+            0
+        } else {
+            prev_char_start(text, caret)
+        }
+    } else {
+        next_char_start(text, caret)
+    }
+}
+
 /// Handle sidebar edit mode keys.
 pub(crate) async fn handle_sidebar_edit(
     app: &mut App,
@@ -764,6 +823,7 @@ pub(crate) async fn handle_sidebar_edit(
             link_kind,
             link_selection,
             scroll,
+            .. // caret + remaining fields unneeded by this destructure
         } => (
             *id,
             *field,
@@ -861,8 +921,13 @@ pub(crate) async fn handle_sidebar_edit(
                             || c == '/'
                             || c == '\\' =>
                     {
-                        if let Mode::SidebarEdit { title_input, .. } = &mut app.mode {
-                            title_input.push(c);
+                        if let Mode::SidebarEdit {
+                            title_input,
+                            title_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *title_caret = insert_at_caret(title_input, *title_caret, c);
                         }
                     }
                     Enter => {
@@ -886,8 +951,33 @@ pub(crate) async fn handle_sidebar_edit(
                         }
                     }
                     Backspace => {
-                        if let Mode::SidebarEdit { title_input, .. } = &mut app.mode {
-                            title_input.pop();
+                        if let Mode::SidebarEdit {
+                            title_input,
+                            title_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *title_caret = backspace_at_caret(title_input, *title_caret);
+                        }
+                    }
+                    Left => {
+                        if let Mode::SidebarEdit {
+                            title_input,
+                            title_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *title_caret = move_caret(title_input, *title_caret, -1);
+                        }
+                    }
+                    Right => {
+                        if let Mode::SidebarEdit {
+                            title_input,
+                            title_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *title_caret = move_caret(title_input, *title_caret, 1);
                         }
                     }
                     Down => {
@@ -925,8 +1015,13 @@ pub(crate) async fn handle_sidebar_edit(
                             || c == '['
                             || c == ']' =>
                     {
-                        if let Mode::SidebarEdit { desc_input, .. } = &mut app.mode {
-                            desc_input.push(c);
+                        if let Mode::SidebarEdit {
+                            desc_input,
+                            desc_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *desc_caret = insert_at_caret(desc_input, *desc_caret, c);
                         }
                     }
                     Enter => {
@@ -950,8 +1045,33 @@ pub(crate) async fn handle_sidebar_edit(
                         }
                     }
                     Backspace => {
-                        if let Mode::SidebarEdit { desc_input, .. } = &mut app.mode {
-                            desc_input.pop();
+                        if let Mode::SidebarEdit {
+                            desc_input,
+                            desc_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *desc_caret = backspace_at_caret(desc_input, *desc_caret);
+                        }
+                    }
+                    Left => {
+                        if let Mode::SidebarEdit {
+                            desc_input,
+                            desc_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *desc_caret = move_caret(desc_input, *desc_caret, -1);
+                        }
+                    }
+                    Right => {
+                        if let Mode::SidebarEdit {
+                            desc_input,
+                            desc_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *desc_caret = move_caret(desc_input, *desc_caret, 1);
                         }
                     }
                     Down => {
@@ -1062,13 +1182,43 @@ pub(crate) async fn handle_sidebar_edit(
             SidebarField::Tags => {
                 match key {
                     Char(c) if c.is_alphanumeric() || c == '-' || c == '_' => {
-                        if let Mode::SidebarEdit { tag_input, .. } = &mut app.mode {
-                            tag_input.push(c);
+                        if let Mode::SidebarEdit {
+                            tag_input,
+                            tag_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *tag_caret = insert_at_caret(tag_input, *tag_caret, c);
                         }
                     }
                     Backspace => {
-                        if let Mode::SidebarEdit { tag_input, .. } = &mut app.mode {
-                            tag_input.pop();
+                        if let Mode::SidebarEdit {
+                            tag_input,
+                            tag_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *tag_caret = backspace_at_caret(tag_input, *tag_caret);
+                        }
+                    }
+                    Left => {
+                        if let Mode::SidebarEdit {
+                            tag_input,
+                            tag_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *tag_caret = move_caret(tag_input, *tag_caret, -1);
+                        }
+                    }
+                    Right => {
+                        if let Mode::SidebarEdit {
+                            tag_input,
+                            tag_caret,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *tag_caret = move_caret(tag_input, *tag_caret, 1);
                         }
                     }
                     Enter => {
@@ -1100,15 +1250,17 @@ pub(crate) async fn handle_sidebar_edit(
                                     let _ = t.send(crate::AppMsg::Refresh).await;
                                 }
                             });
-                        }
-                        if let Mode::SidebarEdit {
-                            tag_input,
-                            input_active,
-                            ..
-                        } = &mut app.mode
-                        {
-                            tag_input.clear();
-                            *input_active = false;
+                            if let Mode::SidebarEdit {
+                                tag_input,
+                                tag_caret,
+                                input_active,
+                                ..
+                            } = &mut app.mode
+                            {
+                                tag_input.clear();
+                                *tag_caret = 0;
+                                *input_active = false;
+                            }
                         }
                     }
                     Esc => {
@@ -1728,13 +1880,131 @@ mod sidebar_edit_tests {
             field: SidebarField::Description,
             input_active: false,
             title_input: String::new(),
+            title_caret: 0,
             desc_input: String::new(),
+            desc_caret: 0,
             desc_scroll: 0,
             tag_input: String::new(),
+            tag_caret: 0,
             link_kind: LinkKind::Pr,
             link_selection: 0,
             scroll: 0,
         };
+    }
+
+    // -- caret helpers --
+
+    #[test]
+    fn test_insert_at_caret_middle_and_move() {
+        let mut s = "abcd".to_string();
+        let c = super::insert_at_caret(&mut s, 2, 'X');
+        assert_eq!(s, "abXcd");
+        assert_eq!(c, 3);
+        // Insert at end.
+        let c2 = super::insert_at_caret(&mut s, 5, 'Z');
+        assert_eq!(s, "abXcdZ");
+        assert_eq!(c2, 6);
+    }
+
+    #[test]
+    fn test_backspace_at_caret() {
+        let mut s = "abcd".to_string();
+        let c = super::backspace_at_caret(&mut s, 3);
+        assert_eq!(s, "abd");
+        assert_eq!(c, 2);
+        // Backspace at 0 is a no-op.
+        let c0 = super::backspace_at_caret(&mut s, 0);
+        assert_eq!(s, "abd");
+        assert_eq!(c0, 0);
+    }
+
+    #[test]
+    fn test_move_caret_clamps() {
+        let s = "abcd";
+        assert_eq!(super::move_caret(s, 2, 1), 3);
+        assert_eq!(super::move_caret(s, 2, -1), 1);
+        // Clamp at boundaries.
+        assert_eq!(super::move_caret(s, 0, -1), 0);
+        assert_eq!(super::move_caret(s, 4, 1), 4);
+    }
+
+    #[test]
+    fn test_caret_handles_multibyte_chars() {
+        // 'é' is 2 UTF-8 bytes; caret must land on char boundaries.
+        let mut s = "é".to_string();
+        let c = super::insert_at_caret(&mut s, 0, 'x');
+        assert_eq!(s, "xé");
+        assert_eq!(c, 1);
+        let back = super::backspace_at_caret(&mut s, c);
+        assert_eq!(s, "é");
+        assert_eq!(
+            back, 0,
+            "deleting the inserted 'x' should leave the caret at the start"
+        );
+    }
+
+    #[test]
+    fn test_edit_form_shows_caret_in_title_when_active() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::SidebarEdit {
+            id: 1,
+            field: SidebarField::Title,
+            input_active: true,
+            title_input: "ab".to_string(),
+            title_caret: 1, // between 'a' and 'b'
+            desc_input: String::new(),
+            desc_caret: 0,
+            desc_scroll: 0,
+            tag_input: String::new(),
+            tag_caret: 0,
+            link_kind: LinkKind::Pr,
+            link_selection: 0,
+            scroll: 0,
+        };
+        let output = render_full(&mut app);
+        // The caret glyph must appear between a and b: "a▌b".
+        let caret = crate::theme::Glyph::CURSOR;
+        let needle: String = ['a', caret, 'b'].iter().collect();
+        assert!(
+            output.contains(&needle),
+            "title edit should render the caret between 'a' and 'b' (expected {needle:?}):\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_edit_form_moves_caret_with_left_right() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::SidebarEdit {
+            id: 1,
+            field: SidebarField::Title,
+            input_active: true,
+            title_input: "hello".to_string(),
+            title_caret: 5,
+            desc_input: String::new(),
+            desc_caret: 0,
+            desc_scroll: 0,
+            tag_input: String::new(),
+            tag_caret: 0,
+            link_kind: LinkKind::Pr,
+            link_selection: 0,
+            scroll: 0,
+        };
+        let (client, tx) = test_client();
+        // Left then Left: caret moves to index 3.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            super::handle_sidebar_edit(&mut app, KeyCode::Left, &client, &tx)
+                .await
+                .unwrap();
+            super::handle_sidebar_edit(&mut app, KeyCode::Left, &client, &tx)
+                .await
+                .unwrap();
+        });
+        if let Mode::SidebarEdit { title_caret, .. } = &app.mode {
+            assert_eq!(*title_caret, 3, "Left twice should move caret to 3");
+        } else {
+            panic!("expected SidebarEdit");
+        }
     }
 
     fn render_full(app: &mut App) -> String {
@@ -2720,6 +2990,24 @@ mod sidebar_edit_tests {
         assert!(
             output.contains("My Task"),
             "todo title should still render:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_read_only_sidebar_wraps_long_description() {
+        let mut app = setup_app_with_todo();
+        app.mode = Mode::Navigate;
+        let long = "word ".repeat(60); // long enough to exceed the sidebar width
+        app.data.plan[0].todo.as_mut().unwrap().description = Some(long.clone());
+        app.data.todos[0].description = Some(long);
+        let output = render_full(&mut app);
+        // The full description must appear (it is not truncated to one line),
+        // and it must occupy multiple lines (wrapped, not clipped).
+        let described: Vec<&str> = output.lines().filter(|l| l.contains("word")).collect();
+        assert!(
+            described.len() > 1,
+            "long description should wrap across multiple lines, got {} words-lines:\n{output}",
+            described.len()
         );
     }
 
