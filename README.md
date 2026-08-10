@@ -85,10 +85,11 @@ by default), `journal_mode(Wal)`, and a busy timeout — see `server/src/db.rs`.
 
 ## Installing via Nix (home-manager)
 
-The repo ships a Nix flake that builds the `server` crate into a `preflight`
-binary and provides a `programs.preflight` home-manager module. This is the
-way to install and configure preflight on a NixOS/home-manager system
-(build-config-through-Nix instead of cloning the repo + devenv).
+The repo ships a Nix flake that builds the `server` and `tui` crates into the
+`preflight` and `pftui` binaries and provides a `programs.preflight`
+home-manager module. This is the way to install and configure preflight on a
+NixOS/home-manager system (build-config-through-Nix instead of cloning the
+repo + devenv).
 
 Reference the flake's module and overlay in your home-manager configuration:
 
@@ -116,7 +117,12 @@ programs.preflight.settings = {
 
 The module installs a `preflight` launcher that hands the rendered
 `config.toml` to the server via the `CONFIG` env var, so `preflight` on your
-`PATH` starts the server with the Nix-built configuration.
+`PATH` starts the server with the Nix-built configuration, and a `pftui`
+launcher pre-pointed at the server's configured host/port. When
+`installService` is enabled (the default), the server also runs as a
+background service (`systemd.user.services.preflight` on Linux,
+`launchd.agents.preflight` on Darwin), so the server is always up and
+`pftui` connects to it on demand.
 
 ### Options
 
@@ -133,6 +139,10 @@ The module installs a `preflight` launcher that hands the rendered
   `linearToken`, `linearTokenPath`, `github.*`, `linear.*`.
 - `programs.preflight.settings.server` — `host`, `port`, `depthLimit`,
   `complexityLimit`.
+- `programs.preflight.installService` — run the server as a background
+  service (`systemd.user.services.preflight` on Linux,
+  `launchd.agents.preflight` on Darwin). Default `true`. Set `false` to run
+  the server manually (e.g. `preflight` on your `PATH`).
 - `programs.preflight.configFile` — a complete `config.toml` to launch with.
   When set it takes precedence over any `settings`-rendered content (the
   module does not merge the two).

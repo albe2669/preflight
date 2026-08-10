@@ -12,7 +12,12 @@
 # authoritative over the inline `*_token`, matching the app's own
 # `resolve_token` precedence.
 
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   toml = import ../toml.nix { inherit lib; };
@@ -21,17 +26,32 @@ let
   # Config tree handed to the renderer. `configFile` (when set) replaces the
   # whole generated file, so settings-rendered content is skipped entirely.
   renderedConfig =
-    if cfg.configFile != null then null
-    else {
-      database = cfg.settings.database;
-      clock = cfg.settings.clock;
-      sync = cfg.settings.sync;
-      server = cfg.settings.server;
-    };
+    if cfg.configFile != null then
+      null
+    else
+      {
+        database = cfg.settings.database;
+        clock = cfg.settings.clock;
+        sync = cfg.settings.sync;
+        server = cfg.settings.server;
+      };
+
+  # TUI launcher that points the tui at the server's configured host/port via
+  # the `PREFLIGHT_GRAPHQL_ENDPOINT` env var the client reads at startup
+  # (`tui/src/main.rs`). The server's default 127.0.0.1:8000 matches the
+  # preflight launcher, so the override only diverges when `settings.server`
+  # is customized.
+  serverAddr = "${cfg.settings.server.host}:${toString cfg.settings.server.port}";
+  tuiLauncher = pkgs.writeShellScriptBin "pftui" ''
+    export PREFLIGHT_GRAPHQL_ENDPOINT="http://${serverAddr}/"
+    exec "${cfg.package}/bin/pftui" "$@"
+  '';
 
   configToml =
-    if renderedConfig == null then cfg.configFile
-    else pkgs.writeText "preflight-config.toml" (toml.renderToml renderedConfig);
+    if renderedConfig == null then
+      cfg.configFile
+    else
+      pkgs.writeText "preflight-config.toml" (toml.renderToml renderedConfig);
 
   # Launcher that hands the rendered (or `configFile`) config to the binary
   # via the `CONFIG` env var the server reads at startup (`Config::load`).
@@ -49,6 +69,17 @@ in
       default = pkgs.preflight;
       defaultText = "pkgs.preflight (the flake's package, exposed via overlay)";
       description = "The preflight package to install. Defaults to the flake package.";
+    };
+
+    installService = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Run the preflight server as a background service: a `systemd` user
+        service on Linux or a `launchd` agent on Darwin (selected by the
+        host platform). The server runs continuously and the `pftui` client
+        connects to it on demand.
+      '';
     };
 
     # A fully-supplied config file takes precedence over Nix-rendered settings.
@@ -132,15 +163,32 @@ in
                     description = "Exclude draft PRs unless authored by the authenticated user.";
                   };
                   filters = lib.mkOption {
-                    type = lib.types.listOf (lib.types.submodule {
-                      options = {
-                        repo = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                        author = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                        reviewer = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                        reviewingTeam = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                        excludeDraft = lib.mkOption { type = lib.types.bool; default = false; };
-                      };
-                    });
+                    type = lib.types.listOf (
+                      lib.types.submodule {
+                        options = {
+                          repo = lib.mkOption {
+                            type = lib.types.nullOr lib.types.str;
+                            default = null;
+                          };
+                          author = lib.mkOption {
+                            type = lib.types.nullOr lib.types.str;
+                            default = null;
+                          };
+                          reviewer = lib.mkOption {
+                            type = lib.types.nullOr lib.types.str;
+                            default = null;
+                          };
+                          reviewingTeam = lib.mkOption {
+                            type = lib.types.nullOr lib.types.str;
+                            default = null;
+                          };
+                          excludeDraft = lib.mkOption {
+                            type = lib.types.bool;
+                            default = false;
+                          };
+                        };
+                      }
+                    );
                     default = [ ];
                     description = "PR filter rules (OR-ed; conditions within a rule AND-ed).";
                   };
@@ -151,14 +199,28 @@ in
             linear = lib.mkOption {
               type = lib.types.submodule {
                 options.filters = lib.mkOption {
-                  type = lib.types.listOf (lib.types.submodule {
-                    options = {
-                      team = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                      assignee = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                      creator = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                      projectLead = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
-                    };
-                  });
+                  type = lib.types.listOf (
+                    lib.types.submodule {
+                      options = {
+                        team = lib.mkOption {
+                          type = lib.types.nullOr lib.types.str;
+                          default = null;
+                        };
+                        assignee = lib.mkOption {
+                          type = lib.types.nullOr lib.types.str;
+                          default = null;
+                        };
+                        creator = lib.mkOption {
+                          type = lib.types.nullOr lib.types.str;
+                          default = null;
+                        };
+                        projectLead = lib.mkOption {
+                          type = lib.types.nullOr lib.types.str;
+                          default = null;
+                        };
+                      };
+                    }
+                  );
                   default = [ ];
                   description = "Issue filter rules.";
                 };
@@ -181,8 +243,14 @@ in
               type = lib.types.port;
               default = 8000;
             };
-            depthLimit = lib.mkOption { type = lib.types.nullOr lib.types.int; default = null; };
-            complexityLimit = lib.mkOption { type = lib.types.nullOr lib.types.int; default = null; };
+            depthLimit = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+            };
+            complexityLimit = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+            };
           };
         };
         default = { };
@@ -190,6 +258,42 @@ in
     };
   };
   config = lib.mkIf cfg.enable {
-    home.packages = [ launcher ];
+    home.packages = [
+      launcher
+      tuiLauncher
+    ];
+
+    systemd.user.services.preflight = lib.mkIf (cfg.installService && pkgs.stdenv.isLinux) {
+      Unit = {
+        Description = "Preflight todo server";
+        After = [ "network.target" ];
+      };
+
+      Service = {
+        Type = "simple";
+        Environment = [ "CONFIG=${configToml}" ];
+        ExecStart = "${cfg.package}/bin/preflight";
+        Restart = "on-failure";
+        RestartSec = 1;
+      };
+
+      Install.WantedBy = [ "default.target" ];
+    };
+
+    launchd.agents.preflight = lib.mkIf (cfg.installService && pkgs.stdenv.isDarwin) {
+      enable = true;
+      config = {
+        ProgramArguments = [ "${cfg.package}/bin/preflight" ];
+        EnvironmentVariables = {
+          CONFIG = configToml;
+        };
+        KeepAlive = {
+          Crashed = true;
+          SuccessfulExit = false;
+        };
+        ProcessType = "Background";
+        RunAtLoad = true;
+      };
+    };
   };
 }

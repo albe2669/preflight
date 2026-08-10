@@ -106,10 +106,11 @@ Rules:
   deployable, named `default` too) and `homeManagerModules.preflight` plus an
   `overlays.default` so the package is available as `pkgs.preflight`. The
   home-manager module's `package` option defaults to `pkgs.preflight`.
-* `nix/package.nix` builds the workspace via naersk with `-p server` and
-  renames the `server` binary to `preflight`. It links the system `sqlite`
-  and `openssl` libs (they are not bundled). Build inputs are real package
-  derivations passed from the flake — never bare name strings.
+* `nix/package.nix` builds the workspace via naersk with `-p server -p tui`
+  and renames the `server` and `tui` binaries to `preflight` and `pftui`. It
+  links the system `sqlite` and `openssl` libs (they are not bundled). Build
+  inputs are real package derivations passed from the flake — never bare
+  name strings.
 * `nix/toml.nix` is the config serializer. The app's `SyncConfig` is
   `deny_unknown_fields` and every required field must be present, so the
   renderer emits exactly the known keys and always includes
@@ -120,9 +121,12 @@ Rules:
 * `nix/modules/home-manager.nix` is the `programs.preflight` module. It
   defaults `settings.database.path` to an absolute state path
   (`~/.local/state/preflight/db.sqlite`) and `settings.server` to
-  `127.0.0.1:8000`, and launches the binary with the rendered config via the
-  `CONFIG` env var. A supplied `configFile` takes precedence over
-  `settings`-rendered content (no merge).
+  `127.0.0.1:8000`, and launches the binaries with the `CONFIG` /
+  `PREFLIGHT_GRAPHQL_ENDPOINT` env vars (a `preflight` server launcher and a
+  `pftui` client launcher). With `installService` (default `true`) it also
+  runs the server as `systemd.user.services.preflight` on Linux or
+  `launchd.agents.preflight` on Darwin. A supplied `configFile` takes
+  precedence over `settings`-rendered content (no merge).
 * `Cargo.lock` is committed: naersk requires it to be present in the source
   tree for reproducible builds.
 
