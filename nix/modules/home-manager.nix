@@ -285,7 +285,7 @@ in
       config = {
         ProgramArguments = [ "${cfg.package}/bin/preflight" ];
         EnvironmentVariables = {
-          CONFIG = configToml;
+          CONFIG = "${configToml}";
         };
         KeepAlive = {
           Crashed = true;
