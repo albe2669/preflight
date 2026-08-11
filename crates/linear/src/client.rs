@@ -10,6 +10,19 @@ use async_trait::async_trait;
 use crate::error::{LinearError, Result};
 use crate::sync::IssueRecord;
 
+/// Maximum characters of a request/response body kept in an error log line.
+const BODY_LOG_LIMIT: usize = 4000;
+
+/// Truncate a body for logging, preserving the tail.
+fn truncate_body(s: impl AsRef<str>) -> String {
+    let s = s.as_ref();
+    if s.len() <= BODY_LOG_LIMIT {
+        s.to_string()
+    } else {
+        format!("…{}", &s[s.len() - BODY_LOG_LIMIT..])
+    }
+}
+
 /// A page of issues returned by the Linear API.
 #[derive(Clone, Debug)]
 pub struct LinearPage {
@@ -161,7 +174,10 @@ pub(crate) struct LinearApiClientImpl {
 /// Construct a new Linear API client.
 pub fn new_client(token: String, base_url: String) -> impl LinearApiClient {
     LinearApiClientImpl {
-        client: reqwest::Client::new(),
+        client: reqwest::Client::builder()
+            .user_agent("preflight")
+            .build()
+            .expect("build reqwest client"),
         token,
         base_url,
     }
@@ -238,6 +254,7 @@ impl LinearApiClient for LinearApiClientImpl {
 
         // If HTTP-level error, log it and return before parsing body.
         if let Err(e) = http_err {
+            let request_body = truncate_body(serde_json::to_string(&body).unwrap_or_default());
             if let LinearError::RateLimited { retry_after } = &e {
                 tracing::warn!(
                     provider = "linear",
@@ -247,6 +264,8 @@ impl LinearApiClient for LinearApiClientImpl {
                     elapsed_ms = elapsed_ms,
                     retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&body_text),
                     "outbound request"
                 );
             } else {
@@ -257,6 +276,8 @@ impl LinearApiClient for LinearApiClientImpl {
                     status = status,
                     elapsed_ms = elapsed_ms,
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&body_text),
                     "outbound request"
                 );
             }
@@ -284,6 +305,7 @@ impl LinearApiClient for LinearApiClientImpl {
         let gql_err = crate::error::map_response_error(status, retry_after, graphql_errors.clone());
 
         if let Err(e) = gql_err {
+            let request_body = truncate_body(serde_json::to_string(&body).unwrap_or_default());
             if let LinearError::RateLimited { retry_after } = &e {
                 tracing::warn!(
                     provider = "linear",
@@ -293,6 +315,8 @@ impl LinearApiClient for LinearApiClientImpl {
                     elapsed_ms = elapsed_ms,
                     retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&body_text),
                     "outbound request"
                 );
             } else {
@@ -303,6 +327,8 @@ impl LinearApiClient for LinearApiClientImpl {
                     status = status,
                     elapsed_ms = elapsed_ms,
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&body_text),
                     "outbound request"
                 );
             }
@@ -678,6 +704,41 @@ pub(crate) mod tests {
         assert!(
             !log_text.contains("query") && !log_text.contains("GraphQL"),
             "body should not be logged, got: {log_text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_log_dumps_request_and_response_bodies() {
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::request::method_path("POST", "/"))
+                .times(1)
+                .respond_with(
+                    httptest::responders::status_code(403)
+                        .body("Request forbidden: missing User-Agent"),
+                ),
+        );
+        let url = server.url("/").to_string();
+
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let _guard = install_capture(buffer.clone());
+
+        let client = new_client("Bearer test".to_string(), url.clone());
+        let filter = serde_json::json!({});
+        let _result = client.issues_page(&filter, None).await;
+
+        let bytes = buffer.lock();
+        let log_text = String::from_utf8_lossy(&bytes);
+
+        // The HTTP-level 403 error log must carry both bodies so the real
+        // upstream message is not lost.
+        assert!(
+            log_text.contains("variables"),
+            "expected request body in log, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("Request forbidden: missing User-Agent"),
+            "expected response body in log, got: {log_text}"
         );
     }
 }

@@ -12,6 +12,19 @@ use crate::entity::enums::PullRequestState;
 use crate::error::{GithubError, Result};
 use crate::filters::FetchedPr;
 
+/// Maximum characters of a request/response body kept in an error log line.
+const BODY_LOG_LIMIT: usize = 4000;
+
+/// Truncate a body for logging, preserving the tail (where GitHub puts the
+/// human-readable error message).
+fn truncate_body(s: impl AsRef<str>) -> String {
+    let s = s.as_ref();
+    if s.len() <= BODY_LOG_LIMIT {
+        s.to_string()
+    } else {
+        format!("…{}", &s[s.len() - BODY_LOG_LIMIT..])
+    }
+}
 /// A single page of search results from the GitHub API.
 #[derive(Clone, Debug)]
 pub struct GithubPage {
@@ -215,7 +228,7 @@ impl GithubApiClient for GithubApiClientImpl {
             }
         "#;
 
-        let body = serde_json::json!({
+        let request_body = serde_json::json!({
             "query": graphql_query,
             "variables": {
                 "query": query,
@@ -229,7 +242,7 @@ impl GithubApiClient for GithubApiClientImpl {
             .post(&self.base_url)
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Accept", "application/vnd.github+json")
-            .json(&body)
+            .json(&request_body)
             .send()
             .await;
 
@@ -269,6 +282,8 @@ impl GithubApiClient for GithubApiClientImpl {
         // Check for HTTP-level errors first
         let http_err = map_response_error(status, retry_after, vec![]);
         if let Err(e) = http_err {
+            let request_body =
+                truncate_body(serde_json::to_string(&request_body).unwrap_or_default());
             if let GithubError::RateLimited { retry_after } = &e {
                 tracing::warn!(
                     provider = "github",
@@ -278,6 +293,8 @@ impl GithubApiClient for GithubApiClientImpl {
                     elapsed_ms = elapsed_ms,
                     retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&text),
                     "outbound request"
                 );
             } else {
@@ -288,6 +305,8 @@ impl GithubApiClient for GithubApiClientImpl {
                     status = status,
                     elapsed_ms = elapsed_ms,
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&text),
                     "outbound request"
                 );
             }
@@ -309,6 +328,8 @@ impl GithubApiClient for GithubApiClientImpl {
 
         let gql_err = map_response_error(status, None, graphql_errors);
         if let Err(e) = gql_err {
+            let request_body =
+                truncate_body(serde_json::to_string(&request_body).unwrap_or_default());
             if let GithubError::RateLimited { retry_after } = &e {
                 tracing::warn!(
                     provider = "github",
@@ -318,6 +339,8 @@ impl GithubApiClient for GithubApiClientImpl {
                     elapsed_ms = elapsed_ms,
                     retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&text),
                     "outbound request"
                 );
             } else {
@@ -328,6 +351,8 @@ impl GithubApiClient for GithubApiClientImpl {
                     status = status,
                     elapsed_ms = elapsed_ms,
                     error = %e,
+                    request_body = %request_body,
+                    response_body = %truncate_body(&text),
                     "outbound request"
                 );
             }
@@ -356,7 +381,10 @@ impl GithubApiClient for GithubApiClientImpl {
 /// Construct a new GitHub API client.
 pub fn new_client(token: String, base_url: String) -> impl GithubApiClient {
     GithubApiClientImpl {
-        client: reqwest::Client::new(),
+        client: reqwest::Client::builder()
+            .user_agent("preflight")
+            .build()
+            .expect("build reqwest client"),
         token,
         base_url,
     }
@@ -720,6 +748,44 @@ pub(crate) mod tests {
         assert!(
             !log_text.contains("query") && !log_text.contains("GraphQL"),
             "body should not be logged, got: {log_text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_log_dumps_request_and_response_bodies() {
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::request::method_path("POST", "/"))
+                .times(1)
+                .respond_with(
+                    httptest::responders::status_code(403)
+                        .body("Request forbidden: missing User-Agent"),
+                ),
+        );
+        let url = server.url("/").to_string();
+
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let _guard = install_capture(buffer.clone());
+
+        let client = new_client("token".to_string(), url.clone());
+        let _result = client.search_page("repo:owner/repo", None).await;
+
+        let bytes = buffer.lock();
+        let log_text = String::from_utf8_lossy(&bytes);
+
+        // The HTTP-level 403 error log must carry both bodies so the real
+        // upstream message (e.g. missing User-Agent) is not lost.
+        assert!(
+            log_text.contains("\"status\":403"),
+            "expected status=403, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("repo:owner/repo"),
+            "expected request body in log, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("Request forbidden: missing User-Agent"),
+            "expected response body in log, got: {log_text}"
         );
     }
 }

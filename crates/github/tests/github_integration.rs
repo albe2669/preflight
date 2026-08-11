@@ -654,6 +654,8 @@ async fn test_request_encoding() {
         Expectation::matching(all_of![
             request::method_path("POST", "/"),
             request::headers(contains(("authorization", "Bearer test-token"))),
+            // GitHub requires a User-Agent on every request (403 otherwise).
+            request::headers(contains(("user-agent", "preflight"))),
             request::headers(contains(("accept", "application/vnd.github+json"))),
             // The compiled query for author:@me should appear in the body
             request::body(matches("author:@me")),

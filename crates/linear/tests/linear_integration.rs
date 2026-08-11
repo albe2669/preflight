@@ -803,6 +803,7 @@ async fn test_request_encoding() {
     struct CaptureState {
         auth: Arc<Mutex<Option<String>>>,
         ct: Arc<Mutex<Option<String>>>,
+        ua: Arc<Mutex<Option<String>>>,
         body: Arc<Mutex<Option<String>>>,
     }
 
@@ -814,10 +815,11 @@ async fn test_request_encoding() {
         fn new(
             auth: Arc<Mutex<Option<String>>>,
             ct: Arc<Mutex<Option<String>>>,
+            ua: Arc<Mutex<Option<String>>>,
             body: Arc<Mutex<Option<String>>>,
         ) -> Self {
             Self {
-                state: CaptureState { auth, ct, body },
+                state: CaptureState { auth, ct, ua, body },
             }
         }
     }
@@ -840,6 +842,9 @@ async fn test_request_encoding() {
             if let Some(ct) = input.headers().get("Content-Type") {
                 *self.state.ct.lock().unwrap() = ct.to_str().ok().map(|s| s.to_string());
             }
+            if let Some(ua) = input.headers().get("User-Agent") {
+                *self.state.ua.lock().unwrap() = ua.to_str().ok().map(|s| s.to_string());
+            }
             let body_bytes = input.body().as_ref();
             *self.state.body.lock().unwrap() = String::from_utf8(body_bytes.to_vec()).ok();
             true
@@ -852,11 +857,13 @@ async fn test_request_encoding() {
 
     let captured_auth = Arc::new(Mutex::new(None));
     let captured_ct = Arc::new(Mutex::new(None));
+    let captured_ua = Arc::new(Mutex::new(None));
     let captured_body = Arc::new(Mutex::new(None));
 
     let matcher = CaptureMatcher::new(
         captured_auth.clone(),
         captured_ct.clone(),
+        captured_ua.clone(),
         captured_body.clone(),
     );
 
@@ -897,6 +904,14 @@ async fn test_request_encoding() {
         ct, "application/json",
         "Content-Type should be application/json"
     );
+
+    // Assert a User-Agent is set (required by many providers).
+    let ua = captured_ua
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("user-agent header");
+    assert_eq!(ua, "preflight", "User-Agent should be set");
 
     // Assert body contains the compiled filter in variables.filter
     let body = captured_body.lock().unwrap().clone().expect("request body");
