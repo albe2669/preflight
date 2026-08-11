@@ -43,7 +43,8 @@ pub enum RemoteError<E> {
 /// Map an HTTP response onto a [`RemoteError`] sentinel, as `Result<(), E>`.
 ///
 /// GraphQL errors are handled before status dispatch, matching the existing
-/// provider behaviour. 2xx → `Ok`; 401 → `Unauthorized`; 403/429 →
+/// provider behaviour. 2xx → `Ok`; 401 → `Unauthorized`; 429 →
+/// `RateLimited`; 403 and every other non-2xx → `Remote`.
 pub fn map_response_error<E: std::fmt::Display>(
     status: u16,
     retry_after: Option<Duration>,
@@ -53,7 +54,7 @@ pub fn map_response_error<E: std::fmt::Display>(
         match status {
             200..=299 => Ok(()),
             401 => Err(RemoteError::Unauthorized),
-            403 | 429 => Err(RemoteError::RateLimited { retry_after }),
+            429 => Err(RemoteError::RateLimited { retry_after }),
             _ => Err(RemoteError::Remote(format!("HTTP {status}"))),
         }
     } else {
@@ -118,17 +119,10 @@ mod tests {
     }
 
     #[test]
-    fn rate_limited_on_403() {
+    fn remote_on_403() {
         assert_sentinel(
-            map_response_error(403, Some(Duration::from_secs(5)), &[]),
-            |e| {
-                matches!(
-                    e,
-                    RemoteError::RateLimited {
-                        retry_after: Some(_)
-                    }
-                )
-            },
+            map_response_error(403, None, &[]),
+            |e| matches!(e, RemoteError::Remote(m) if m == "HTTP 403"),
         );
     }
 

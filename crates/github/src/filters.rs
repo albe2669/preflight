@@ -73,7 +73,7 @@ pub fn compile_github_query(filters: &[GithubFilter]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" OR ");
-    format!("is:pr AND ({or_part})")
+    format!("is:pr AND is:open AND ({or_part})")
 }
 
 fn filter_to_clause(f: &GithubFilter) -> String {

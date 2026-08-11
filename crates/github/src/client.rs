@@ -194,7 +194,7 @@ impl GithubApiClient for GithubApiClientImpl {
 
         let graphql_query = r#"
             query($query: String!, $first: Int!, $after: String) {
-                search(query: $query, first: $first, after: $after, type: ISSUE) {
+                search(query: $query, first: $first, after: $after, type: ISSUE_ADVANCED) {
                     pageInfo {
                         endCursor
                         hasNextPage
