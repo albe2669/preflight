@@ -6,6 +6,8 @@ pub struct Config {
     pub clock: ClockConfig,
     pub sync: SyncConfig,
     pub server: ServerConfig,
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +90,22 @@ pub struct ServerConfig {
     pub port: u16,
     pub depth_limit: Option<usize>,
     pub complexity_limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct LoggingConfig {
+    pub level: String,
+    pub directory: String,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".into(),
+            directory: "logs".into(),
+        }
+    }
 }
 
 impl Config {
@@ -486,5 +504,62 @@ port = 0
 "#;
         let err = Config::from_content(toml).unwrap_err().to_string();
         assert!(err.contains("@me"), "error should direct to use @me: {err}");
+    }
+    #[test]
+    fn test_logging_config_default_values() {
+        let cfg = LoggingConfig::default();
+        assert_eq!(cfg.level, "info");
+        assert_eq!(cfg.directory, "logs");
+    }
+
+    #[test]
+    fn test_config_without_logging_section_uses_defaults() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = []
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        assert_eq!(cfg.logging.level, "info");
+        assert_eq!(cfg.logging.directory, "logs");
+    }
+
+    #[test]
+    fn test_config_with_logging_section_parses() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = []
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+[logging]
+level = "debug"
+directory = "/tmp/logs"
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        assert_eq!(cfg.logging.level, "debug");
+        assert_eq!(cfg.logging.directory, "/tmp/logs");
     }
 }

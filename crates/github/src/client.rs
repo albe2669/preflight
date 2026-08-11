@@ -190,6 +190,8 @@ impl GithubApiClient for GithubApiClientImpl {
     async fn search_page(&self, query: &str, after: Option<&str>) -> Result<GithubPage> {
         use crate::error::map_response_error;
 
+        let start = std::time::Instant::now();
+
         let graphql_query = r#"
             query($query: String!, $first: Int!, $after: String) {
                 search(query: $query, first: $first, after: $after, type: ISSUE) {
@@ -222,33 +224,75 @@ impl GithubApiClient for GithubApiClientImpl {
             }
         });
 
-        let resp = self
+        let response = self
             .client
             .post(&self.base_url)
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Accept", "application/vnd.github+json")
             .json(&body)
             .send()
-            .await
-            .map_err(|e| GithubError::Remote(e.to_string()))?;
+            .await;
 
-        let status = resp.status().as_u16();
-        let headers = resp.headers().clone();
-        let text = resp
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        // Map transport errors (connection refused, timeout, etc.) to a
+        // loggable error before returning.
+        let response = match response {
+            Ok(r) => r,
+            Err(e) => {
+                let err_str = e.to_string();
+                tracing::error!(
+                    provider = "github",
+                    operation = "search_page",
+                    endpoint = %self.base_url,
+                    status = 0u16,
+                    elapsed_ms = elapsed_ms,
+                    error = %err_str,
+                    "outbound request"
+                );
+                return Err(GithubError::Remote(err_str));
+            }
+        };
+
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        let retry_after = headers
+            .get("Retry-After")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(std::time::Duration::from_secs);
+        let text = response
             .text()
             .await
             .map_err(|e| GithubError::Remote(e.to_string()))?;
 
         // Check for HTTP-level errors first
-        map_response_error(
-            status,
-            headers
-                .get("Retry-After")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(std::time::Duration::from_secs),
-            vec![],
-        )?;
+        let http_err = map_response_error(status, retry_after, vec![]);
+        if let Err(e) = http_err {
+            if let GithubError::RateLimited { retry_after } = &e {
+                tracing::warn!(
+                    provider = "github",
+                    operation = "search_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
+                    error = %e,
+                    "outbound request"
+                );
+            } else {
+                tracing::error!(
+                    provider = "github",
+                    operation = "search_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    error = %e,
+                    "outbound request"
+                );
+            }
+            return Err(e);
+        }
 
         let json: Value =
             serde_json::from_str(&text).map_err(|e| GithubError::SchemaMismatch(e.to_string()))?;
@@ -263,9 +307,49 @@ impl GithubApiClient for GithubApiClientImpl {
             })
             .unwrap_or_default();
 
-        map_response_error(status, None, graphql_errors)?;
+        let gql_err = map_response_error(status, None, graphql_errors);
+        if let Err(e) = gql_err {
+            if let GithubError::RateLimited { retry_after } = &e {
+                tracing::warn!(
+                    provider = "github",
+                    operation = "search_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
+                    error = %e,
+                    "outbound request"
+                );
+            } else {
+                tracing::error!(
+                    provider = "github",
+                    operation = "search_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    error = %e,
+                    "outbound request"
+                );
+            }
+            return Err(e);
+        }
 
-        parse_github_page(json)
+        let page = parse_github_page(json)?;
+        let items = page.prs.len();
+
+        tracing::info!(
+            provider = "github",
+            operation = "search_page",
+            endpoint = %self.base_url,
+            status = status,
+            elapsed_ms = elapsed_ms,
+            items = items,
+            has_next_page = page.has_next_page,
+            cursor = page.end_cursor.as_deref(),
+            "outbound request"
+        );
+
+        Ok(page)
     }
 }
 
@@ -307,8 +391,9 @@ impl RemoteApiClient for GithubClientAdapter {
     }
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use parking_lot::Mutex;
     use proptest::prelude::*;
 
     fn sample_response(page_size: usize, cursor: Option<&str>, has_next: bool) -> Value {
@@ -493,5 +578,148 @@ mod tests {
                 let _ = parse_github_page(val);
             }
         }
+    }
+
+    // ── outbound-request logging tests ──────────────────────────────
+
+    pub(crate) struct LogCaptureWriter {
+        inner: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl std::io::Write for LogCaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut guard = self.inner.lock();
+            guard.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Clone for LogCaptureWriter {
+        fn clone(&self) -> Self {
+            Self {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    pub(crate) struct LogCaptureMakeWriter {
+        inner: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl LogCaptureMakeWriter {
+        pub(crate) fn new(inner: Arc<Mutex<Vec<u8>>>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl Default for LogCaptureMakeWriter {
+        fn default() -> Self {
+            Self {
+                inner: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl Clone for LogCaptureMakeWriter {
+        fn clone(&self) -> Self {
+            Self {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCaptureMakeWriter {
+        type Writer = LogCaptureWriter;
+        fn make_writer(&'a self) -> Self::Writer {
+            LogCaptureWriter {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    fn install_capture(buffer: Arc<Mutex<Vec<u8>>>) -> tracing::subscriber::DefaultGuard {
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+            .with_writer(LogCaptureMakeWriter::new(buffer))
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::set_default(subscriber)
+    }
+
+    #[tokio::test]
+    async fn test_outbound_request_log_has_stats_and_no_body() {
+        let response_body = serde_json::json!({
+            "data": {
+                "search": {
+                    "pageInfo": { "endCursor": "cur1", "hasNextPage": false },
+                    "nodes": [
+                        {
+                            "number": 40,
+                            "title": "Fix",
+                            "url": "https://github.com/owner/repo/pull/40",
+                            "state": "OPEN",
+                            "author": { "login": "alice" },
+                            "createdAt": "2024-01-01T00:00:00Z",
+                            "updatedAt": "2024-01-02T00:00:00Z",
+                            "repository": { "nameWithOwner": "owner/repo" }
+                        }
+                    ]
+                }
+            }
+        });
+
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::any())
+                .respond_with(httptest::responders::json_encoded(response_body)),
+        );
+        let url = server.url("/graphql").to_string();
+
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let _guard = install_capture(buffer.clone());
+
+        let client = new_client("token".to_string(), url.clone());
+        let _result = client.search_page("repo:owner/repo", None).await;
+
+        let bytes = buffer.lock();
+        let log_text = String::from_utf8_lossy(&bytes);
+
+        assert!(
+            log_text.contains("\"message\":\"outbound request\""),
+            "expected outbound request log message, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"provider\":\"github\""),
+            "expected provider=github, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"operation\":\"search_page\""),
+            "expected operation=search_page, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"endpoint\""),
+            "expected endpoint field, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"status\":200"),
+            "expected status=200, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"elapsed_ms\""),
+            "expected elapsed_ms field, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"items\""),
+            "expected items field, got: {log_text}"
+        );
+        // Ensure request/response body is NOT logged
+        assert!(
+            !log_text.contains("query") && !log_text.contains("GraphQL"),
+            "body should not be logged, got: {log_text}"
+        );
     }
 }

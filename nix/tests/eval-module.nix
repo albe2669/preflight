@@ -52,12 +52,36 @@ let
     ];
   };
 
+  # Second eval with explicit logging overrides to test custom values
+  evalLoggingOverride = lib.evalModules {
+    specialArgs = { inherit pkgs; };
+    modules = [
+      fakeHome
+      ({ config, lib, ... }: {
+        imports = [ module ];
+        config.programs.preflight.enable = true;
+        config.programs.preflight.settings.logging.level = "DEBUG";
+        config.programs.preflight.settings.logging.directory = "/var/log/preflight";
+      })
+    ];
+  };
+
+  settingsOverride = evalLoggingOverride.config.programs.preflight.settings;
+  renderedOverride = toml.renderToml {
+    database = settingsOverride.database;
+    clock = settingsOverride.clock;
+    sync = settingsOverride.sync;
+    server = settingsOverride.server;
+    logging = settingsOverride.logging;
+  };
+
   settings = eval.config.programs.preflight.settings;
   rendered = toml.renderToml {
     database = settings.database;
     clock = settings.clock;
     sync = settings.sync;
     server = settings.server;
+    logging = settings.logging;
   };
   launcherNames = map (p: p.name) eval.config.home.packages;
 in
@@ -68,4 +92,13 @@ in
   tz = settings.clock.timezone;
   launcherNames = launcherNames;
   renderedConfig = rendered;
+
+  # Default logging: section present with app defaults
+  loggingDefaultOk = lib.hasInfix "[logging]" rendered
+    && lib.hasInfix "level = \"info\"" rendered
+    && lib.hasInfix "directory = \"logs\"" rendered;
+
+  # Override logging: custom level and directory render correctly
+  loggingOverrideOk = lib.hasInfix "level = \"DEBUG\"" renderedOverride
+    && lib.hasInfix "directory = \"/var/log/preflight\"" renderedOverride;
 }

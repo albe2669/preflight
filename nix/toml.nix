@@ -2,9 +2,8 @@
 # matching the structs in `crates/server/src/config.rs`.
 #
 # The app's `SyncConfig` is `#[serde(deny_unknown_fields)]`, so the rendered
-# file must contain exactly the known keys. TOP-LEVEL sections are
-# `database`, `clock`, `sync`, `server`. `[sync]` carries the scalar
-# `*_token` / `*_token_path` keys plus the nested `github` and `linear`
+# `database`, `clock`, `logging`, `sync`, `server`. `[sync]` carries the
+# scalar `*_token` / `*_token_path` keys plus the nested `github` and `linear`
 # tables; `github.filters` and `linear.filters` are arrays of tables
 # (`[[sync.github.filters]]`).
 #

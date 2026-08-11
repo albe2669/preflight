@@ -93,7 +93,9 @@ a real remote API outside `--features live-api`.
 - `main` is the only place config is loaded. Inject it; resolvers never call
   `std::env::var`.
 - No secrets in `config/default.toml`. Secrets come from env, never logged.
-- `tracing` only. No `println!`/`eprintln!`/`dbg!` in library crates.
+- Crates log via `tracing` macros. The process subscriber is initialized once in `main` — no crate may call `tracing_subscriber::...init` or install its own layer.
+- No `println!`, `eprintln!`, or `dbg!` in library crates.
+- The `[logging]` config section (`level`, `directory`) sets log defaults. Environment overrides: `PREFLIGHT_LOG_LEVEL`, `PREFLIGHT_LOG_DIR`. When `RUST_LOG` is set, it takes precedence over the config level.
 
 ## 6.5 Nix packaging (flake + home-manager)
 
@@ -158,8 +160,8 @@ outside `main` (and `main` returns `Result`, not panic).
 - [ ] No concrete silo / driver / SDK types leaked across a boundary.
 - [ ] Crate depends on another? via trait, injected in `main`, mocked in
       unit tests.
-- [ ] New config value? in the owning crate's `Config`, crate-prefixed,
-      loaded in `main`.
+- [ ] New config value? in the owning crate's `Config`, crate-prefixed, loaded in `main`. For `[logging]`, the section has `level`/`directory` defaults (info/logs) and env overrides `PREFLIGHT_LOG_LEVEL`/`PREFLIGHT_LOG_DIR`.
+- [ ] No `tracing_subscriber::...init` or subscriber install outside `main`.
 - [ ] No new static state / `lazy_static` for domain state.
 - [ ] Errors wrapped with context via `thiserror` `#[from]` / `map_err`.
 - [ ] `cargo clippy -- -D warnings` clean.

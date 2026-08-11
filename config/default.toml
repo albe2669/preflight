@@ -17,6 +17,10 @@ timezone = "America/Los_Angeles"
 # morning plan. Stored as i64 to match Clock::day_start_hour.
 day_start_hour = 4
 
+[logging]
+level = "info"
+directory = "logs"
+
 [sync]
 # GitHub. Leave the token unset in development; the sync crate treats absence
 # as a no-op. Filters are structured rules — see [[sync.github.filters]] below.

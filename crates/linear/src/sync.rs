@@ -76,6 +76,12 @@ impl LinearSync for LinearSyncImpl {
             if filter.is_null() {
                 cursor::put(&db, "linear", None, "ok", None).await?;
             } else {
+                tracing::info!(
+                    provider = "linear",
+                    filter_summary = %filter,
+                    "sync loop start"
+                );
+
                 // Buffer all issues across pages, then upsert all at once.
                 // A first-page failure surfaces the actual error; a mid-page
                 // failure (after a page succeeded) returns PartialResults
@@ -83,17 +89,34 @@ impl LinearSync for LinearSyncImpl {
                 let result = SyncLoop::new(self.client.clone()).run(&filter).await;
                 match result {
                     Ok(sync_result) => {
+                        let items = sync_result.items.len();
                         for issue in &sync_result.items {
                             upsert_issue(&db, issue).await?;
                         }
+                        tracing::info!(
+                            provider = "linear",
+                            items = items,
+                            cursor = sync_result.end_cursor.as_deref(),
+                            "sync loop end"
+                        );
                         cursor::put(&db, "linear", None, "ok", None).await?;
                     }
                     Err(remote_err) => {
                         let err: LinearError = remote_err.into();
                         if let LinearError::PartialResults = err {
+                            tracing::error!(
+                                provider = "linear",
+                                error = %err,
+                                "sync loop end"
+                            );
                             cursor::put(&db, "linear", None, "error", None).await?;
                             return Err(LinearError::PartialResults);
                         }
+                        tracing::error!(
+                            provider = "linear",
+                            error = %err,
+                            "sync loop end"
+                        );
                         cursor::put(&db, "linear", None, "error", Some(err.to_string())).await?;
                         return Err(err);
                     }
@@ -101,10 +124,18 @@ impl LinearSync for LinearSyncImpl {
             }
         }
 
-        sync_state::Entity::find_by_id("linear")
+        let state = sync_state::Entity::find_by_id("linear")
             .one(&db)
             .await?
-            .ok_or_else(|| LinearError::NotFound)
+            .ok_or_else(|| LinearError::NotFound)?;
+        tracing::info!(
+            provider = "linear",
+            status = %state.last_status,
+            error = state.last_error.as_deref(),
+            cursor = state.cursor.as_deref(),
+            "sync state saved"
+        );
+        Ok(state)
     }
 }
 
@@ -381,5 +412,77 @@ mod tests {
         assert_eq!(result.last_status, "ok");
 
         assert_eq!(fake.call_count(), 0);
+    }
+    // ── sync lifecycle logging tests ────────────────────────────────
+
+    /// A capture subscriber installed once as the process default so events
+    /// emitted from tokio worker threads (e.g. DB awaits inside `pull`) are
+    /// captured regardless of which thread they land on. Tests clear the
+    /// shared buffer before running and inspect it after.
+    fn ensure_global_capture() -> Arc<parking_lot::Mutex<Vec<u8>>> {
+        use std::sync::{LazyLock, OnceLock};
+        static BUFFER: LazyLock<Arc<parking_lot::Mutex<Vec<u8>>>> =
+            LazyLock::new(|| Arc::new(parking_lot::Mutex::new(Vec::new())));
+        static INSTALLED: OnceLock<()> = OnceLock::new();
+
+        // Install the capture subscriber once as the process default so the
+        // events emitted from tokio worker threads inside `pull` are captured.
+        INSTALLED.get_or_init(|| {
+            let subscriber = tracing_subscriber::fmt()
+                .json()
+                .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+                .with_writer(crate::client::tests::LogCaptureMakeWriter::new(
+                    BUFFER.clone(),
+                ))
+                .with_ansi(false)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber).expect("install global capture");
+        });
+        BUFFER.clone()
+    }
+
+    #[tokio::test]
+    async fn test_sync_lifecycle_logs_loop_start_and_end() {
+        let db = setup_db().await;
+        let fake = Arc::new(FakeClient::new(vec![
+            Ok(make_page("issue-2", None, false)),
+            Ok(make_page("issue-1", Some("X"), true)),
+        ]));
+        let svc = build_svc(
+            db.clone(),
+            fake,
+            LinearOptions {
+                token: "fake-token".into(),
+                filters: vec![LinearFilter {
+                    team: Some("ENG".into()),
+                    ..Default::default()
+                }],
+            },
+        );
+
+        let buffer = ensure_global_capture();
+        buffer.lock().clear();
+
+        let result = svc.pull().await.expect("pull should succeed");
+        assert_eq!(result.last_status, "ok");
+
+        let log_text = {
+            let bytes = buffer.lock();
+            String::from_utf8_lossy(&bytes).to_string()
+        };
+
+        // Assert sync lifecycle events are present.
+        assert!(
+            log_text.contains("sync loop start"),
+            "expected sync loop start event, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"provider\":\"linear\""),
+            "expected provider=linear, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("sync loop end"),
+            "expected sync loop end event, got: {log_text}"
+        );
     }
 }

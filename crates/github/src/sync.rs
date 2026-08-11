@@ -87,6 +87,12 @@ impl GithubSync for GithubSyncImpl {
                 .ok_or_else(|| GithubError::NotFound);
         }
 
+        tracing::info!(
+            provider = "github",
+            filter_summary = %query,
+            "sync loop start"
+        );
+
         // Buffer all PRs across pages before upserting.
         // A first-page failure surfaces the actual error (Unauthorized,
         // RateLimited, Remote, SchemaMismatch). A mid-page failure (after
@@ -102,17 +108,29 @@ impl GithubSync for GithubSyncImpl {
                     self.opts.exclude_drafts_unless_authored_by_me,
                 );
 
+                let items = filtered.len();
+
                 // Upsert each PR
                 for fetched in &filtered {
                     let rec = fetched_to_record(fetched);
                     upsert_pr(&db, &rec).await?;
                 }
 
+                tracing::info!(
+                    provider = "github",
+                    items = items,
+                    cursor = sync_result.end_cursor.as_deref(),
+                    "sync loop end"
+                );
                 cursor::put(&db, "github", sync_result.end_cursor, "ok", None).await?;
             }
             Err(remote_err) => {
                 let err: GithubError = remote_err.into();
-                tracing::error!(error = %err, "github page fetch failed");
+                tracing::error!(
+                    provider = "github",
+                    error = %err,
+                    "sync loop end"
+                );
                 cursor::put(&db, "github", None, "error", Some(err.to_string())).await?;
                 return if let GithubError::PartialResults = err {
                     Err(GithubError::PartialResults)
@@ -122,10 +140,18 @@ impl GithubSync for GithubSyncImpl {
             }
         }
 
-        sync_state::Entity::find_by_id("github")
+        let state = sync_state::Entity::find_by_id("github")
             .one(&db)
             .await?
-            .ok_or_else(|| GithubError::NotFound)
+            .ok_or_else(|| GithubError::NotFound)?;
+        tracing::info!(
+            provider = "github",
+            status = %state.last_status,
+            error = state.last_error.as_deref(),
+            cursor = state.cursor.as_deref(),
+            "sync state saved"
+        );
+        Ok(state)
     }
 }
 
@@ -474,5 +500,84 @@ mod tests {
         assert_eq!(state.last_status, "ok");
         let count = pull_request::Entity::find().count(&db).await.unwrap();
         assert_eq!(count, 2);
+    }
+
+    // ── sync lifecycle logging tests ────────────────────────────────
+
+    /// A capture subscriber installed once as the process default so events
+    /// emitted from tokio worker threads (e.g. DB awaits inside `pull`) are
+    /// captured regardless of which thread they land on. Tests clear the
+    /// shared buffer before running and inspect it after.
+    fn ensure_global_capture() -> Arc<Mutex<Vec<u8>>> {
+        use std::sync::{LazyLock, OnceLock};
+        static BUFFER: LazyLock<Arc<Mutex<Vec<u8>>>> =
+            LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
+        static INSTALLED: OnceLock<()> = OnceLock::new();
+
+        INSTALLED.get_or_init(|| {
+            let subscriber = tracing_subscriber::fmt()
+                .json()
+                .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+                .with_writer(crate::client::tests::LogCaptureMakeWriter::new(
+                    BUFFER.clone(),
+                ))
+                .with_ansi(false)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber).expect("install global capture");
+        });
+        BUFFER.clone()
+    }
+
+    #[tokio::test]
+    async fn test_sync_lifecycle_logs_loop_start_and_end() {
+        let db = setup_db().await;
+
+        let page = GithubPage {
+            prs: vec![fetched_pr(42, false, false)],
+            end_cursor: None,
+            has_next_page: false,
+        };
+        let client = FakeClient {
+            pages: Arc::new(Mutex::new(vec![page])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![GithubFilter {
+                    repo: Some("org/repo".into()),
+                    ..Default::default()
+                }],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+
+        let buffer = ensure_global_capture();
+        buffer.lock().clear();
+
+        let result = sync.pull().await.expect("pull should succeed");
+        assert_eq!(result.last_status, "ok");
+
+        let log_text = {
+            let bytes = buffer.lock();
+            String::from_utf8_lossy(&bytes).to_string()
+        };
+
+        // Assert sync lifecycle events are present.
+        assert!(
+            log_text.contains("sync loop start"),
+            "expected sync loop start event, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"provider\":\"github\""),
+            "expected provider=github, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("sync loop end"),
+            "expected sync loop end event, got: {log_text}"
+        );
     }
 }

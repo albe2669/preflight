@@ -605,11 +605,23 @@ Rules:
 
 ## Logging
 
-* `tracing` is the logging facade, initialized once in `main`. No `println!` in library crates, no third-party logging libraries.
+* `tracing` macros are the only logging mechanism. Crates use the process subscriber given to them — it is initialized once in `main`. **No crate may initialize its own `tracing_subscriber`.**
+* No `println!`, `eprintln!`, or `dbg!` in library crates.
 * Structured fields, stable keys: `tracing::info!(todo_id = id, "todo created")`.
 * Levels: `DEBUG` for diagnostics, `INFO` for lifecycle and notable events, `WARN` for degraded-but-handled, `ERROR` only where the error is finally handled.
 * Error logs will trigger an alert, so use sparingly.
 * Always use span context (`#[tracing::instrument]`) so request-scoped attributes are included automatically.
+
+### Configuration
+
+The `[logging]` section in `config/default.toml` controls logging:
+
+* `level` — default directive string (default `"info"`). Overridden by `PREFLIGHT_LOG_LEVEL`. When `RUST_LOG` is set, `EnvFilter` uses the config level as a default and lets `RUST_LOG` directives take precedence.
+* `directory` — directory for the day-rolling JSON log file (default `"logs"`). Overridden by `PREFLIGHT_LOG_DIR`.
+
+### Outbound request logging
+
+Every outbound HTTP request from a domain client must log an event with stable fields: `provider`, `operation`, `endpoint`, `status`, `elapsed_ms`, and page or item counts. Log `INFO` on success, `WARN`/`ERROR` on error or rate-limit paths. Include the error message on failure. **Never log request or response bodies.**
 
 ## Tooling, lint, and devenv
 

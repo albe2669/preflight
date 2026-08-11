@@ -1,16 +1,36 @@
 mod config;
 mod db;
+mod logging;
 mod routes;
 
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let cfg = config::Config::load()?;
+
+    // Resolve log level: PREFLIGHT_LOG_LEVEL > config level
+    let (log_level, level_source) = match std::env::var("PREFLIGHT_LOG_LEVEL") {
+        Ok(v) => (v, "PREFLIGHT_LOG_LEVEL"),
+        Err(_) => (cfg.logging.level.clone(), "config"),
+    };
+    let level_filter =
+        logging::parse_level(&log_level).map_err(|e| anyhow::anyhow!("invalid log level: {e}"))?;
+
+    // Resolve log directory: PREFLIGHT_LOG_DIR > config directory
+    let (log_dir, dir_source) = match std::env::var("PREFLIGHT_LOG_DIR") {
+        Ok(v) => (v, "PREFLIGHT_LOG_DIR"),
+        Err(_) => (cfg.logging.directory.clone(), "config"),
+    };
+
+    let _logging_guard = logging::init(level_filter, log_dir.as_ref())?;
+    tracing::info!(
+        level = %log_level,
+        level_source = level_source,
+        directory = %log_dir,
+        directory_source = dir_source,
+        "logging initialized"
+    );
     let clock = cfg.clock()?;
     let db = db::connect(&cfg.database.path).await?;
     db::migrate(&db).await?;

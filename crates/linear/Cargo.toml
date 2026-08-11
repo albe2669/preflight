@@ -38,4 +38,5 @@ proptest = "1"
 parking_lot = "0.12"
 http = "1"
 hyper = { version = "1", features = ["http1"] }
+tracing-subscriber = { workspace = true }
 httptest = "0.16"

@@ -174,6 +174,8 @@ impl LinearApiClient for LinearApiClientImpl {
         filter: &serde_json::Value,
         after: Option<&str>,
     ) -> Result<LinearPage> {
+        let start = std::time::Instant::now();
+
         let mut variables = serde_json::Map::new();
         variables.insert("filter".into(), filter.clone());
         if let Some(cursor) = after {
@@ -197,7 +199,28 @@ impl LinearApiClient for LinearApiClientImpl {
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
-            .await?;
+            .await;
+
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        // Map transport errors (connection refused, timeout, etc.) to a
+        // loggable error before returning.
+        let response = match response {
+            Ok(r) => r,
+            Err(e) => {
+                let err_str = e.to_string();
+                tracing::error!(
+                    provider = "linear",
+                    operation = "issues_page",
+                    endpoint = %self.base_url,
+                    status = 0u16,
+                    elapsed_ms = elapsed_ms,
+                    error = %err_str,
+                    "outbound request"
+                );
+                return Err(LinearError::Remote(err_str));
+            }
+        };
 
         let status = response.status().as_u16();
         let retry_after = response
@@ -209,9 +232,37 @@ impl LinearApiClient for LinearApiClientImpl {
 
         // Check HTTP-level errors first (401, 429, 5xx) — the body may not
         // be JSON on these paths.
-        crate::error::map_response_error(status, retry_after, vec![])?;
+        let http_err = crate::error::map_response_error(status, retry_after, vec![]);
 
-        let body_text = response.text().await?;
+        let body_text = response.text().await.unwrap_or_default();
+
+        // If HTTP-level error, log it and return before parsing body.
+        if let Err(e) = http_err {
+            if let LinearError::RateLimited { retry_after } = &e {
+                tracing::warn!(
+                    provider = "linear",
+                    operation = "issues_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
+                    error = %e,
+                    "outbound request"
+                );
+            } else {
+                tracing::error!(
+                    provider = "linear",
+                    operation = "issues_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    error = %e,
+                    "outbound request"
+                );
+            }
+            return Err(e);
+        }
+
         let json: serde_json::Value =
             serde_json::from_str(&body_text).map_err(|e| LinearError::Remote(e.to_string()))?;
 
@@ -230,9 +281,50 @@ impl LinearApiClient for LinearApiClientImpl {
             })
             .unwrap_or_default();
 
-        crate::error::map_response_error(status, retry_after, graphql_errors)?;
+        let gql_err = crate::error::map_response_error(status, retry_after, graphql_errors.clone());
 
-        parse_linear_page(json)
+        if let Err(e) = gql_err {
+            if let LinearError::RateLimited { retry_after } = &e {
+                tracing::warn!(
+                    provider = "linear",
+                    operation = "issues_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    retry_after_ms = retry_after.map(|d| d.as_millis() as u64),
+                    error = %e,
+                    "outbound request"
+                );
+            } else {
+                tracing::error!(
+                    provider = "linear",
+                    operation = "issues_page",
+                    endpoint = %self.base_url,
+                    status = status,
+                    elapsed_ms = elapsed_ms,
+                    error = %e,
+                    "outbound request"
+                );
+            }
+            return Err(e);
+        }
+
+        let page = parse_linear_page(json)?;
+        let items = page.issues.len();
+
+        tracing::info!(
+            provider = "linear",
+            operation = "issues_page",
+            endpoint = %self.base_url,
+            status = status,
+            elapsed_ms = elapsed_ms,
+            items = items,
+            has_next_page = page.has_next_page,
+            cursor = page.end_cursor.as_deref(),
+            "outbound request"
+        );
+
+        Ok(page)
     }
 }
 
@@ -302,8 +394,9 @@ impl RemoteApiClient for LinearClientAdapter {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use parking_lot::Mutex;
     use proptest::prelude::*;
 
     fn sample_response() -> serde_json::Value {
@@ -436,5 +529,155 @@ mod tests {
                 let _ = parse_linear_page(val);
             }
         }
+    }
+    // ── outbound-request logging tests ──────────────────────────────
+
+    pub(crate) struct LogCaptureWriter {
+        inner: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl std::io::Write for LogCaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut guard = self.inner.lock();
+            guard.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Clone for LogCaptureWriter {
+        fn clone(&self) -> Self {
+            Self {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    pub(crate) struct LogCaptureMakeWriter {
+        inner: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl LogCaptureMakeWriter {
+        pub(crate) fn new(inner: Arc<Mutex<Vec<u8>>>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl Default for LogCaptureMakeWriter {
+        fn default() -> Self {
+            Self {
+                inner: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl Clone for LogCaptureMakeWriter {
+        fn clone(&self) -> Self {
+            Self {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCaptureMakeWriter {
+        type Writer = LogCaptureWriter;
+        fn make_writer(&'a self) -> Self::Writer {
+            LogCaptureWriter {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    fn install_capture(buffer: Arc<Mutex<Vec<u8>>>) -> tracing::subscriber::DefaultGuard {
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+            .with_writer(LogCaptureMakeWriter::new(buffer))
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::set_default(subscriber)
+    }
+
+    #[tokio::test]
+    async fn test_outbound_request_log_has_stats_and_no_body() {
+        let response_body = serde_json::json!({
+            "data": {
+                "issues": {
+                    "pageInfo": { "endCursor": "cur1", "hasNextPage": false },
+                    "nodes": [
+                        {
+                            "id": "test-id",
+                            "identifier": "ENG-1",
+                            "title": "Hello",
+                            "description": null,
+                            "url": "https://linear.app/ENG-1",
+                            "state": { "name": "Todo", "type": "triage" },
+                            "priority": null,
+                            "team": null,
+                            "assignee": null,
+                            "createdAt": null,
+                            "updatedAt": null
+                        }
+                    ]
+                }
+            }
+        });
+
+        // Spawn an httptest server that returns a valid Linear issues response
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::any())
+                .respond_with(httptest::responders::json_encoded(response_body)),
+        );
+        let url = server.url("/graphql").to_string();
+
+        // Capture log output
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let _guard = install_capture(buffer.clone());
+
+        // Call the client
+        let client = new_client("Bearer test".to_string(), url.clone());
+        let filter = serde_json::json!({});
+        let _result = client.issues_page(&filter, None).await;
+
+        let bytes = buffer.lock();
+        let log_text = String::from_utf8_lossy(&bytes);
+
+        // Assert outbound request event fields are present
+        assert!(
+            log_text.contains("\"message\":\"outbound request\""),
+            "expected outbound request log message, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"provider\":\"linear\""),
+            "expected provider=linear, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"operation\":\"issues_page\""),
+            "expected operation=issues_page, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"endpoint\""),
+            "expected endpoint field, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"status\":200"),
+            "expected status=200, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"elapsed_ms\""),
+            "expected elapsed_ms field, got: {log_text}"
+        );
+        assert!(
+            log_text.contains("\"items\""),
+            "expected items field, got: {log_text}"
+        );
+        // Ensure request/response body is NOT logged
+        assert!(
+            !log_text.contains("query") && !log_text.contains("GraphQL"),
+            "body should not be logged, got: {log_text}"
+        );
     }
 }

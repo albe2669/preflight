@@ -32,6 +32,7 @@ let
       {
         database = cfg.settings.database;
         clock = cfg.settings.clock;
+        logging = cfg.settings.logging;
         sync = cfg.settings.sync;
         server = cfg.settings.server;
       };
@@ -117,6 +118,23 @@ in
               type = lib.types.int;
               default = 4;
               description = "Hour (0-23) at which a logical day starts.";
+            };
+          };
+        };
+        default = { };
+      };
+      logging = lib.mkOption {
+        type = lib.types.submodule {
+          options = {
+            level = lib.mkOption {
+              type = lib.types.str;
+              default = "info";
+              description = "Default log level (e.g. info, debug, warn, error).";
+            };
+            directory = lib.mkOption {
+              type = lib.types.str;
+              default = "logs";
+              description = "Directory for log files.";
             };
           };
         };
