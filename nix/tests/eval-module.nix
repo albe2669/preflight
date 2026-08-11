@@ -93,12 +93,15 @@ in
   launcherNames = launcherNames;
   renderedConfig = rendered;
 
-  # Default logging: section present with app defaults
-  loggingDefaultOk = lib.hasInfix "[logging]" rendered
+  # Default logging: section present with app defaults (dir defaults to the
+  # state path, mirroring the database path, since packaged mode has no root)
+  loggingDefaultOk =
+    lib.hasInfix "[logging]" rendered
     && lib.hasInfix "level = \"info\"" rendered
-    && lib.hasInfix "directory = \"logs\"" rendered;
+    && lib.hasInfix "directory = \"/home/u/.local/state/preflight/logs\"" rendered;
 
   # Override logging: custom level and directory render correctly
-  loggingOverrideOk = lib.hasInfix "level = \"DEBUG\"" renderedOverride
+  loggingOverrideOk =
+    lib.hasInfix "level = \"DEBUG\"" renderedOverride
     && lib.hasInfix "directory = \"/var/log/preflight\"" renderedOverride;
 }

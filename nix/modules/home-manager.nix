@@ -133,8 +133,8 @@ in
             };
             directory = lib.mkOption {
               type = lib.types.str;
-              default = "logs";
-              description = "Directory for log files.";
+              default = "${config.home.homeDirectory}/.local/state/preflight/logs";
+              description = "Absolute path to the log directory. Packaged mode has no project root, so a relative path is not meaningful.";
             };
           };
         };

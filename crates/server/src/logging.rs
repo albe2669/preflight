@@ -15,6 +15,9 @@ pub struct GuardedSubscriber {
 ///
 /// RUST_LOG still takes precedence over the config level via EnvFilter builder.
 pub fn init(level: LevelFilter, directory: &Path) -> anyhow::Result<GuardedSubscriber> {
+    std::fs::create_dir_all(directory)
+        .map_err(|e| anyhow::anyhow!("failed to create logging directory {directory:?}: {e}"))?;
+
     let env_filter = EnvFilter::builder()
         .with_default_directive(level.into())
         .from_env_lossy();
