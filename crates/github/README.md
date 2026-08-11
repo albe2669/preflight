@@ -36,11 +36,12 @@ returned.
 A first-page failure surfaces the actual error type above; only failures
 after the first page map to `PartialResults`.
 
-## Post-fetch filtering
-
 `filters.rs` compiles `<GithubFilter>` rules into a GraphQL `search` query
-(`ISSUE_ADVANCED`) and provides `apply_draft_policy` (drop drafts unless
-authored by me) which runs on fetched records before upsert.
+(`ISSUE_ADVANCED`) and provides `apply_draft_policy` (global catch-all) which
+runs on fetched records before upsert.  Per-rule draft keys:
+`exclude_others_drafts` compiles to `(draft:false OR author:@me)` (keeps the
+user's own drafts in the result set); `exclude_my_drafts` compiles to
+`draft:false`.  Both true excludes all drafts for that rule.
 
 ## Integration tests
 

@@ -62,13 +62,16 @@ pub struct LinearSyncConfig {
 }
 
 #[derive(Debug, Deserialize, Default, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct GithubFilterRule {
     pub repo: Option<String>,
     pub author: Option<String>,
     pub reviewer: Option<String>,
     pub reviewing_team: Option<String>,
     #[serde(default)]
-    pub exclude_draft: bool,
+    pub exclude_others_drafts: bool,
+    #[serde(default)]
+    pub exclude_my_drafts: bool,
 }
 
 #[derive(Debug, Deserialize, Default, Clone, PartialEq)]
@@ -93,12 +96,19 @@ impl Config {
         let path = std::env::var("CONFIG").unwrap_or_else(|_| "config/default.toml".to_string());
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("failed to read config {path}: {e}"))?;
-        let cfg: Config = toml::from_str(&content).map_err(|e| {
+        Self::from_content(&content)
+    }
+
+    /// Parse a TOML string into a `Config` and validate it.
+    pub fn from_content(content: &str) -> anyhow::Result<Config> {
+        let cfg: Config = toml::from_str(content).map_err(|e| {
             let msg = e.to_string();
             let hint = if msg.contains("github_search_query") {
                 " `github_search_query` was removed; use `[[sync.github.filters]]` instead."
             } else if msg.contains("linear_team_keys") {
                 " `linear_team_keys` was removed; use `[[sync.linear.filters]]` instead."
+            } else if msg.contains("exclude_draft") {
+                " `exclude_draft` was renamed to `exclude_others_drafts`."
             } else {
                 ""
             };
@@ -134,6 +144,20 @@ impl GithubSyncConfig {
                     "sync.github.filters[{i}] has no conditions; set at least one field"
                 ));
             }
+            if let Some(author) = &rule.author {
+                if author == "me" {
+                    return Err(format!(
+                        "sync.github.filters[{i}].author = \"me\" is not allowed; use \"@me\" instead"
+                    ));
+                }
+            }
+            if let Some(reviewer) = &rule.reviewer {
+                if reviewer == "me" {
+                    return Err(format!(
+                        "sync.github.filters[{i}].reviewer = \"me\" is not allowed; use \"@me\" instead"
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -158,7 +182,8 @@ impl GithubFilterRule {
             && self.author.is_none()
             && self.reviewer.is_none()
             && self.reviewing_team.is_none()
-            && !self.exclude_draft
+            && !self.exclude_others_drafts
+            && !self.exclude_my_drafts
     }
 }
 
@@ -183,8 +208,8 @@ linear_token = "tok"
 [github]
 exclude_drafts_unless_authored_by_me = true
 filters = [
-  { repo = "api-specs", reviewing_team = "ai-agents", exclude_draft = true },
-  { author = "me" },
+  { repo = "api-specs", reviewing_team = "ai-agents", exclude_others_drafts = true },
+  { author = "@me" },
 ]
 
 [linear]
@@ -200,6 +225,7 @@ filters = [
         let cfg: SyncConfig = toml::from_str(github_two_rule_toml()).unwrap();
         assert_eq!(cfg.github.filters.len(), 2);
         assert_eq!(cfg.github.filters[0].repo.as_deref(), Some("api-specs"));
+        assert!(cfg.github.filters[0].exclude_others_drafts);
         assert!(cfg.github.exclude_drafts_unless_authored_by_me);
         assert_eq!(cfg.linear.filters.len(), 2);
     }
@@ -256,7 +282,8 @@ filters = []
                     author: None,
                     reviewer: None,
                     reviewing_team: None,
-                    exclude_draft: false,
+                    exclude_others_drafts: false,
+                    exclude_my_drafts: false,
                 }],
             },
             github_token_path: None,
@@ -346,5 +373,118 @@ filters = []
     fn test_resolve_token_missing_path_errors() {
         let err = resolve_token("tok", Some("/nonexistent/preflight-token-file")).unwrap_err();
         assert!(err.to_string().contains("read token path"));
+    }
+    #[test]
+    fn test_exclude_others_drafts_parses() {
+        let toml = r#"
+github_token = "tok"
+linear_token = "tok"
+[github]
+filters = [
+  { repo = "x", exclude_others_drafts = true },
+]
+[linear]
+filters = []
+"#;
+        let cfg: SyncConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.github.filters[0].exclude_others_drafts);
+        assert!(!cfg.github.filters[0].exclude_my_drafts);
+    }
+
+    #[test]
+    fn test_exclude_my_drafts_parses() {
+        let toml = r#"
+github_token = "tok"
+linear_token = "tok"
+[github]
+filters = [
+  { repo = "x", exclude_my_drafts = true },
+]
+[linear]
+filters = []
+"#;
+        let cfg: SyncConfig = toml::from_str(toml).unwrap();
+        assert!(!cfg.github.filters[0].exclude_others_drafts);
+        assert!(cfg.github.filters[0].exclude_my_drafts);
+    }
+
+    #[test]
+    fn test_old_exclude_draft_key_rejected() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = [
+  { repo = "x", exclude_draft = true },
+]
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+"#;
+        let res = Config::from_content(toml);
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(
+            err.contains("exclude_others_drafts"),
+            "error should mention the renamed key: {err}"
+        );
+    }
+
+    #[test]
+    fn test_at_me_author_parses_and_validates() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = [
+  { author = "@me" },
+]
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        assert_eq!(cfg.sync.github.filters[0].author.as_deref(), Some("@me"));
+    }
+
+    #[test]
+    fn test_bare_me_author_rejected() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = [
+  { author = "me" },
+]
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+"#;
+        let err = Config::from_content(toml).unwrap_err().to_string();
+        assert!(err.contains("@me"), "error should direct to use @me: {err}");
     }
 }

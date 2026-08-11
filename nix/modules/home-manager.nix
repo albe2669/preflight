@@ -182,9 +182,15 @@ in
                             type = lib.types.nullOr lib.types.str;
                             default = null;
                           };
-                          excludeDraft = lib.mkOption {
+                          excludeOthersDrafts = lib.mkOption {
                             type = lib.types.bool;
                             default = false;
+                            description = "Exclude drafts not authored by the authenticated user.";
+                          };
+                          excludeMyDrafts = lib.mkOption {
+                            type = lib.types.bool;
+                            default = false;
+                            description = "Exclude drafts authored by the authenticated user.";
                           };
                         };
                       }

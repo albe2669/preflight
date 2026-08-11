@@ -98,6 +98,7 @@ impl GithubSync for GithubSyncImpl {
                 // Post-fetch filters
                 let filtered = apply_draft_policy(
                     sync_result.items,
+                    &self.opts.filters,
                     self.opts.exclude_drafts_unless_authored_by_me,
                 );
 

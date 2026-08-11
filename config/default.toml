@@ -36,11 +36,17 @@ linear_token_path = ""
 # When true, draft PRs are excluded unless authored by the authenticated user.
 exclude_drafts_unless_authored_by_me = true
 # Each rule matches a PR by repo, author, reviewer, reviewing_team, and/or
-# exclude_draft. Rules are OR-ed; conditions within a rule are AND-ed.
+# draft-exclusion keys.  Rules are OR-ed; conditions within a rule are AND-ed.
+# Per-rule draft keys (each defaults to false):
+#   exclude_others_drafts — exclude drafts NOT authored by me (keep my drafts)
+#   exclude_my_drafts     — exclude drafts authored by me (keep others' drafts)
+#   Both true excludes ALL drafts for that rule.
+# `author` / `reviewer` use "@me" for the authenticated user (bare "me" is rejected).
 # Examples:
-#   { author = "me" }
-#   { repo = "api-specs", reviewing_team = "ai-agents", exclude_draft = true }
-#   { repo = "agent-api", exclude_draft = true }
+#   { author = "@me" }
+#   { repo = "api-specs", reviewing_team = "ai-agents", exclude_others_drafts = true }
+#   { repo = "agent-api", exclude_others_drafts = true }
+#   { repo = "agent-api", exclude_my_drafts = true }
 #   { repo = "albe2669/" }
 filters = []
 

@@ -6,7 +6,8 @@ pub struct GithubFilter {
     pub author: Option<Author>,
     pub reviewer: Option<Author>,
     pub reviewing_team: Option<String>,
-    pub exclude_draft: bool,
+    pub exclude_others_drafts: bool,
+    pub exclude_my_drafts: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,7 +40,8 @@ impl GithubFilter {
             && self.author.is_none()
             && self.reviewer.is_none()
             && self.reviewing_team.is_none()
-            && !self.exclude_draft
+            && !self.exclude_others_drafts
+            && !self.exclude_my_drafts
     }
 }
 
@@ -99,8 +101,10 @@ fn filter_to_clause(f: &GithubFilter) -> String {
         parts.push(format!("team-review-requested:{team}"));
     }
 
-    if f.exclude_draft {
+    if f.exclude_my_drafts {
         parts.push("draft:false".into());
+    } else if f.exclude_others_drafts {
+        parts.push("(draft:false OR author:@me)".into());
     }
 
     parts.join(" AND ")
@@ -117,16 +121,80 @@ pub fn apply_team_exclusion(prs: Vec<FetchedPr>, excluded_teams: &[String]) -> V
         .collect()
 }
 
+fn rule_matches_pr(f: &GithubFilter, pr: &FetchedPr) -> bool {
+    if let Some(repo) = &f.repo {
+        let repo_full = format!("{}/{}", pr.repo_owner, pr.repo_name);
+        if repo.contains('/') {
+            if repo != &repo_full {
+                return false;
+            }
+        } else {
+            // repo as org-only — match owner
+            if repo != &pr.repo_owner {
+                return false;
+            }
+        }
+    }
+
+    if let Some(author) = &f.author {
+        match author {
+            Author::Me => {
+                if !pr.authored_by_me {
+                    return false;
+                }
+            }
+            Author::Login(l) => {
+                if pr.author_login.as_deref() != Some(l.as_str()) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    if let Some(reviewer) = &f.reviewer {
+        match reviewer {
+            Author::Me => {
+                if !pr.review_requested {
+                    return false;
+                }
+            }
+            Author::Login(_) => {
+                // FetchedPr lacks requested reviewer logins — documented limitation
+                return false;
+            }
+        }
+    }
+
+    if let Some(team) = &f.reviewing_team {
+        if !pr.requested_reviewer_teams.iter().any(|t| t == team) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// When policy on, keep non-drafts and drafts authored by me.
 pub fn apply_draft_policy(
     prs: Vec<FetchedPr>,
+    filters: &[GithubFilter],
     exclude_drafts_unless_authored_by_me: bool,
 ) -> Vec<FetchedPr> {
-    if !exclude_drafts_unless_authored_by_me {
-        return prs;
-    }
     prs.into_iter()
-        .filter(|pr| !pr.is_draft || pr.authored_by_me)
+        .filter(|pr| {
+            if !pr.is_draft {
+                return true;
+            }
+            // Draft — check if any filter rule with exclude_my_drafts matches
+            let has_exclude_my = filters
+                .iter()
+                .any(|f| f.exclude_my_drafts && rule_matches_pr(f, pr));
+            if has_exclude_my {
+                return !pr.authored_by_me;
+            }
+            // Global policy
+            !exclude_drafts_unless_authored_by_me || pr.authored_by_me
+        })
         .collect()
 }
 
@@ -166,12 +234,12 @@ mod tests {
             GithubFilter {
                 repo: Some("api-specs".into()),
                 reviewing_team: Some("ai-agents".into()),
-                exclude_draft: true,
+                exclude_others_drafts: true,
                 ..Default::default()
             },
         ];
         let got = compile_github_query(&filters);
-        let expected = "is:pr AND (author:@me OR (repo:api-specs AND team-review-requested:ai-agents AND draft:false))";
+        let expected = "is:pr AND (author:@me OR (repo:api-specs AND team-review-requested:ai-agents AND (draft:false OR author:@me)))";
         assert_eq!(&got, expected);
     }
 
@@ -179,11 +247,11 @@ mod tests {
     fn test_compile_github_query_single_repo_non_draft() {
         let filters = vec![GithubFilter {
             repo: Some("agent-api".into()),
-            exclude_draft: true,
+            exclude_others_drafts: true,
             ..Default::default()
         }];
         let got = compile_github_query(&filters);
-        let expected = "is:pr AND repo:agent-api AND draft:false";
+        let expected = "is:pr AND repo:agent-api AND (draft:false OR author:@me)";
         assert_eq!(&got, expected);
     }
 
@@ -308,7 +376,7 @@ mod tests {
             // draft by someone else, drop
             fetched_pr(3, true, false),
         ];
-        let got = apply_draft_policy(prs, true);
+        let got = apply_draft_policy(prs, &[], true);
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].number, 1);
         assert_eq!(got[1].number, 2);
@@ -317,7 +385,7 @@ mod tests {
     #[test]
     fn test_apply_draft_policy_off_keeps_all() {
         let prs = vec![fetched_pr(1, false, false), fetched_pr(2, true, false)];
-        let got = apply_draft_policy(prs, false);
+        let got = apply_draft_policy(prs, &[], false);
         assert_eq!(got.len(), 2);
     }
 
@@ -335,6 +403,130 @@ mod tests {
     fn test_is_empty_false_when_has_repo() {
         let f = GithubFilter {
             repo: Some("x".into()),
+            ..Default::default()
+        };
+        assert!(!f.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // 2.1 exclude_others_drafts compiles to (draft:false OR author:@me)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_exclude_others_drafts_compiles_clause() {
+        let f = GithubFilter {
+            exclude_others_drafts: true,
+            ..Default::default()
+        };
+        let got = compile_github_query(&[f]);
+        assert_eq!(&got, "is:pr AND (draft:false OR author:@me)");
+    }
+
+    // -----------------------------------------------------------------------
+    // 2.2 exclude_my_drafts compiles to draft:false
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_exclude_my_drafts_compiles_clause() {
+        let f = GithubFilter {
+            exclude_my_drafts: true,
+            ..Default::default()
+        };
+        let got = compile_github_query(&[f]);
+        assert_eq!(&got, "is:pr AND draft:false");
+    }
+
+    // -----------------------------------------------------------------------
+    // 2.3 both set compiles to draft:false (exclude_my takes priority)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_both_draft_flags_compiles_to_draft_false() {
+        let f = GithubFilter {
+            exclude_others_drafts: true,
+            exclude_my_drafts: true,
+            ..Default::default()
+        };
+        let got = compile_github_query(&[f]);
+        assert_eq!(&got, "is:pr AND draft:false");
+    }
+
+    // -----------------------------------------------------------------------
+    // 3.1 global on + draft by me matched by exclude_others rule => kept
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_global_on_exclude_others_rule_keeps_my_draft() {
+        let prs = vec![fetched_pr(1, true, true)]; // draft by me
+        let filters = vec![GithubFilter {
+            repo: Some("o".into()),
+            exclude_others_drafts: true,
+            ..Default::default()
+        }];
+        let got = apply_draft_policy(prs, &filters, true);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].number, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // 3.2 global on + draft by me matched by exclude_my rule => dropped
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_global_on_exclude_my_rule_drops_my_draft() {
+        let prs = vec![fetched_pr(1, true, true)]; // draft by me
+        let filters = vec![GithubFilter {
+            repo: Some("o".into()),
+            exclude_my_drafts: true,
+            ..Default::default()
+        }];
+        let got = apply_draft_policy(prs, &filters, true);
+        assert_eq!(got.len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // 3.3 draft by me matching a keep-mine AND an exclude_my rule => dropped
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_draft_matching_keep_mine_and_exclude_my_dropped() {
+        let prs = vec![fetched_pr(1, true, true)]; // draft by me
+        let filters = vec![
+            // keep-mine rule (exclude_others only — doesn't trigger exclude_my path)
+            GithubFilter {
+                repo: Some("o".into()),
+                exclude_others_drafts: true,
+                ..Default::default()
+            },
+            // exclude_my rule
+            GithubFilter {
+                repo: Some("o".into()),
+                author: Some(Author::Me),
+                exclude_my_drafts: true,
+                ..Default::default()
+            },
+        ];
+        let got = apply_draft_policy(prs, &filters, true);
+        assert_eq!(got.len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // is_empty tests for new draft fields
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_empty_false_when_exclude_others_drafts() {
+        let f = GithubFilter {
+            exclude_others_drafts: true,
+            ..Default::default()
+        };
+        assert!(!f.is_empty());
+    }
+
+    #[test]
+    fn test_is_empty_false_when_exclude_my_drafts() {
+        let f = GithubFilter {
+            exclude_my_drafts: true,
             ..Default::default()
         };
         assert!(!f.is_empty());

@@ -29,7 +29,8 @@ async fn main() -> anyhow::Result<()> {
             author: r.author.as_deref().map(parse_github_actor),
             reviewer: r.reviewer.as_deref().map(parse_github_actor),
             reviewing_team: r.reviewing_team.clone(),
-            exclude_draft: r.exclude_draft,
+            exclude_others_drafts: r.exclude_others_drafts,
+            exclude_my_drafts: r.exclude_my_drafts,
         })
         .collect();
     let linear_filters: Vec<linear::sync::LinearFilter> = cfg
@@ -101,10 +102,9 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
     Ok(())
 }
-
-/// Map a config string ("me" or a login) to the GitHub domain `Author` enum.
+/// Map a config string ("@me" or a login) to the GitHub domain `Author` enum.
 fn parse_github_actor(s: &str) -> github::Author {
-    if s == "me" {
+    if s == "@me" {
         github::Author::Me
     } else {
         github::Author::Login(s.to_string())
