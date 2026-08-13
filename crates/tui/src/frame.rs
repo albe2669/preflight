@@ -417,6 +417,64 @@ pub fn panel<'a>(title: Option<&str>, focused: bool) -> Block<'a> {
     b
 }
 
+pub fn render_todo_picker(f: &mut Frame, app: &crate::app::App, area: Rect) {
+    let crate::app::Mode::LinkTodo { selection, .. } = &app.mode else {
+        return;
+    };
+    let selection = *selection;
+
+    let width = 46u16.min(area.width);
+    let height = 12u16.min(area.height);
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y + (area.height - height) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    f.render_widget(ratatui::widgets::Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::ACCENT))
+        .title(Span::styled(
+            " LINK TO TODO ",
+            Style::default().fg(Palette::ACCENT),
+        ));
+    f.render_widget(block, rect);
+
+    let inner = Rect::new(x + 1, y + 1, width - 2, height - 2);
+    let mut items: Vec<ListItem> = Vec::new();
+    for (i, todo) in app.data.todos.iter().enumerate() {
+        let (glyph, color) = status_glyph(&todo.status);
+        let is_current = i == selection;
+        let marker = if is_current {
+            Span::styled(
+                Glyph::CURSOR.to_string(),
+                Style::default().fg(Palette::ACCENT),
+            )
+        } else {
+            Span::raw(" ")
+        };
+        let line = Line::from(vec![
+            marker,
+            Span::raw(" "),
+            Span::styled(glyph.to_string(), Style::default().fg(color)),
+            Span::raw(" "),
+            Span::styled(
+                todo.title.clone(),
+                if is_current {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                },
+            ),
+        ]);
+        items.push(ListItem::new(line));
+    }
+
+    let list = List::new(items).style(Style::default().bg(Palette::BG).fg(Palette::TEXT));
+    let mut state = ListState::default();
+    state.select(Some(selection));
+    f.render_stateful_widget(list, inner, &mut state);
+}
+
 // ---- Shared grouped-by-state list renderer (D3) ----
 
 use crate::app::STATUS_ORDER;

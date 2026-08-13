@@ -43,6 +43,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if let Mode::StatusSelect { .. } = &app.mode {
         render_status_select(f, app, area);
     }
+    if let Mode::LinkTodo { .. } = &app.mode {
+        render_link_todo(f, app, area);
+    }
     if let Mode::Confirm { .. } = &app.mode {
         render_confirm(f, app, area);
     }
@@ -1628,6 +1631,90 @@ fn render_status_select(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 }
 
+// ---- Link-to-todo picker (Inbox `L`) ----
+
+pub(crate) async fn handle_link_todo(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyCode,
+    client: &gql::Client,
+    tx: &mpsc::Sender<crate::AppMsg>,
+) -> anyhow::Result<bool> {
+    use crate::gql::LinkRelation;
+    use ratatui::crossterm::event::KeyCode::*;
+
+    let n = app.data.todos.len();
+    match key {
+        Char('j') | Down => {
+            if let Mode::LinkTodo { selection, .. } = &mut app.mode {
+                if *selection + 1 < n {
+                    *selection += 1;
+                }
+            }
+        }
+        Char('k') | Up => {
+            if let Mode::LinkTodo { selection, .. } = &mut app.mode {
+                *selection = selection.saturating_sub(1);
+            }
+        }
+        Esc => {
+            app.mode = Mode::Navigate;
+            app.toast = None;
+        }
+        Enter => {
+            let (todo_id, pr_id, issue_id, msg) = match &app.mode {
+                Mode::LinkTodo {
+                    selection,
+                    pr_id,
+                    linear_issue_id,
+                    ..
+                } => {
+                    let Some(todo) = app.data.todos.get(*selection) else {
+                        return Ok(false);
+                    };
+                    let msg = if pr_id.is_some() {
+                        "pr linked"
+                    } else {
+                        "issue linked"
+                    };
+                    (todo.id, *pr_id, *linear_issue_id, msg)
+                }
+                _ => return Ok(false),
+            };
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                let result = if let Some(pr) = pr_id {
+                    c.link_pull_request(todo_id, pr, LinkRelation::References)
+                        .await
+                } else if let Some(issue) = issue_id {
+                    c.link_linear_issue(todo_id, issue).await
+                } else {
+                    return;
+                };
+                match result {
+                    Ok(_) => {
+                        let _ = t
+                            .send(crate::AppMsg::Toast(ToastKind::Success, msg.into()))
+                            .await;
+                        let _ = t.send(crate::AppMsg::Refresh).await;
+                    }
+                    Err(e) => {
+                        let _ = t
+                            .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
+                            .await;
+                    }
+                }
+            });
+            app.mode = Mode::Navigate;
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn render_link_todo(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    frame::render_todo_picker(f, app, area);
+}
 // ---- Help overlay ----
 
 pub(crate) fn handle_help(

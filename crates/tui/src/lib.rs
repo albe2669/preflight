@@ -193,6 +193,7 @@ pub(crate) async fn handle_key(
     // Mode-specific handling. Clone the mode-matching data so we don't hold
     // an immutable borrow of `app` while the handlers need `&mut app`.
     match app.mode.clone() {
+        Mode::LinkTodo { .. } => views::handle_link_todo(app, key, client, tx).await,
         Mode::Navigate => views::handle_navigate(app, key, client, tx).await,
         Mode::InlineCreate { input } => {
             views::handle_inline_create(app, key, client, tx, &input).await

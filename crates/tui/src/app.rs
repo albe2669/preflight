@@ -72,6 +72,11 @@ pub enum Mode {
         selection: usize,
         reason: Option<String>,
     },
+    LinkTodo {
+        pr_id: Option<i32>,
+        linear_issue_id: Option<i32>,
+        selection: usize,
+    },
     SidebarEdit {
         id: i32,
         field: SidebarField,
