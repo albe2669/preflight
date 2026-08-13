@@ -810,6 +810,7 @@ pub(crate) async fn handle_sidebar_edit(
         tag_input,
         link_kind,
         link_selection,
+        attaching,
         _scroll,
     ) = match &app.mode {
         Mode::SidebarEdit {
@@ -822,6 +823,7 @@ pub(crate) async fn handle_sidebar_edit(
             tag_input,
             link_kind,
             link_selection,
+            attaching,
             scroll,
             .. // caret + remaining fields unneeded by this destructure
         } => (
@@ -834,6 +836,7 @@ pub(crate) async fn handle_sidebar_edit(
             tag_input.clone(),
             *link_kind,
             *link_selection,
+            *attaching,
             *scroll,
         ),
         _ => return Ok(false),
@@ -1094,6 +1097,117 @@ pub(crate) async fn handle_sidebar_edit(
             }
             SidebarField::Links => {
                 match key {
+                    // Enter the attach picker: source candidates from the synced
+                    // PRs / Linear issues rather than the already-linked items.
+                    Char('a') if !attaching => {
+                        if let Mode::SidebarEdit {
+                            attaching,
+                            link_selection,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *attaching = true;
+                            *link_selection = 0;
+                        }
+                    }
+                    // Attach picker: cancel without mutating.
+                    Esc if attaching => {
+                        if let Mode::SidebarEdit { attaching, .. } = &mut app.mode {
+                            *attaching = false;
+                        }
+                    }
+                    // Attach picker: switch PR/Linear kind.
+                    Tab if attaching => {
+                        if let Mode::SidebarEdit {
+                            link_kind,
+                            link_selection,
+                            ..
+                        } = &mut app.mode
+                        {
+                            *link_kind = match link_kind {
+                                LinkKind::Pr => LinkKind::Linear,
+                                LinkKind::Linear => LinkKind::Pr,
+                            };
+                            *link_selection = 0;
+                        }
+                    }
+                    Char('j') | Down if attaching => {
+                        let max_sel = if link_kind == LinkKind::Pr {
+                            app.data.pulls.len().saturating_sub(1)
+                        } else {
+                            app.data.linears.len().saturating_sub(1)
+                        };
+                        if let Mode::SidebarEdit { link_selection, .. } = &mut app.mode {
+                            if *link_selection < max_sel {
+                                *link_selection += 1;
+                            }
+                        }
+                    }
+                    Char('k') | Up if attaching => {
+                        if let Mode::SidebarEdit { link_selection, .. } = &mut app.mode {
+                            *link_selection = link_selection.saturating_sub(1);
+                        }
+                    }
+                    Enter if attaching => {
+                        // Confirm attach: link the selected PR / Linear issue.
+                        let c = client.clone();
+                        let t = tx.clone();
+                        if link_kind == LinkKind::Pr {
+                            if let Some(pr) = app.data.pulls.get(link_selection) {
+                                let pr_id = pr.id;
+                                tokio::spawn(async move {
+                                    if c.link_pull_request(
+                                        id,
+                                        pr_id,
+                                        crate::gql::LinkRelation::References,
+                                    )
+                                    .await
+                                    .is_ok()
+                                    {
+                                        let _ = t
+                                            .send(crate::AppMsg::Toast(
+                                                ToastKind::Success,
+                                                "pr linked".into(),
+                                            ))
+                                            .await;
+                                        let _ = t.send(crate::AppMsg::Refresh).await;
+                                    }
+                                });
+                                if let Mode::SidebarEdit {
+                                    attaching,
+                                    input_active,
+                                    ..
+                                } = &mut app.mode
+                                {
+                                    *attaching = false;
+                                    *input_active = false;
+                                }
+                            }
+                        } else if let Some(issue) = app.data.linears.get(link_selection) {
+                            let issue_id = issue.id;
+                            tokio::spawn(async move {
+                                if c.link_linear_issue(id, issue_id).await.is_ok() {
+                                    let _ = t
+                                        .send(crate::AppMsg::Toast(
+                                            ToastKind::Success,
+                                            "issue linked".into(),
+                                        ))
+                                        .await;
+                                    let _ = t.send(crate::AppMsg::Refresh).await;
+                                }
+                            });
+                            if let Mode::SidebarEdit {
+                                attaching,
+                                input_active,
+                                ..
+                            } = &mut app.mode
+                            {
+                                *attaching = false;
+                                *input_active = false;
+                            }
+                        }
+                    }
+                    // ---- browse already-linked items (not attaching) ----
                     Tab => {
                         if let Mode::SidebarEdit {
                             link_kind,
@@ -1126,8 +1240,6 @@ pub(crate) async fn handle_sidebar_edit(
                         }
                     }
                     Enter => {
-                        // Attach the selected link (already linked items are shown;
-                        // this is mainly for the UI flow — Enter on a link just navigates)
                         if let Mode::SidebarEdit { input_active, .. } = &mut app.mode {
                             *input_active = false;
                         }
@@ -1849,12 +1961,14 @@ mod render_tests {
 }
 #[cfg(test)]
 mod sidebar_edit_tests {
-    use crate::app::tests::{make_plan_row, make_todo};
+    use crate::app::tests::{make_linear, make_plan_row, make_pr, make_todo};
     use crate::app::{App, LinkKind, Mode, SidebarField, ToastKind};
     use crate::gql;
     use crate::test_support::buffer_text;
     use ratatui::crossterm::event::KeyCode;
     use ratatui::{Terminal, backend::TestBackend};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
     use tokio::sync::mpsc;
 
     // -- helpers --
@@ -1863,6 +1977,62 @@ mod sidebar_edit_tests {
         let client = gql::Client::new("http://127.0.0.1:0");
         let (tx, _rx) = mpsc::channel::<crate::AppMsg>(32);
         (client, tx)
+    }
+
+    /// A minimal GraphQL mock server for confirming that a mutation posts.
+    /// Captures the request body, responds with a stub `data` payload, and
+    /// stores the captured request in `captures` (shared Arc<parking_lot::Mutex>).
+    async fn spawn_gql_mock() -> (
+        String,
+        std::sync::Arc<parking_lot::Mutex<Vec<serde_json::Value>>>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let captures: std::sync::Arc<parking_lot::Mutex<Vec<serde_json::Value>>> =
+            std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let captures2 = captures.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let caps = captures2.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 1024];
+                    loop {
+                        let n = socket.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                        if buf.len() > 1_000_000 {
+                            break;
+                        }
+                    }
+                    // Split headers from body.
+                    if let Some(idx) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let body = &buf[idx + 4..];
+                        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(body) {
+                            caps.lock().push(val);
+                        }
+                    }
+                    // Respond with an empty data JSON so the client decodes.
+                    let body = r#"{"data":{}}"#;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = socket.write_all(resp.as_bytes()).await;
+                    let _ = socket.flush().await;
+                });
+            }
+        });
+        (format!("http://{addr}"), captures)
     }
 
     fn setup_app_with_todo() -> App {
@@ -1888,6 +2058,7 @@ mod sidebar_edit_tests {
             tag_caret: 0,
             link_kind: LinkKind::Pr,
             link_selection: 0,
+            attaching: false,
             scroll: 0,
         };
     }
@@ -1959,6 +2130,7 @@ mod sidebar_edit_tests {
             tag_caret: 0,
             link_kind: LinkKind::Pr,
             link_selection: 0,
+            attaching: false,
             scroll: 0,
         };
         let output = render_full(&mut app);
@@ -1987,6 +2159,7 @@ mod sidebar_edit_tests {
             tag_caret: 0,
             link_kind: LinkKind::Pr,
             link_selection: 0,
+            attaching: false,
             scroll: 0,
         };
         let (client, tx) = test_client();
@@ -3256,5 +3429,231 @@ mod sidebar_edit_tests {
             output.contains("TITLE") || output.contains("▸ TITLE") || output.contains("  TITLE"),
             "the editable TITLE field should render:\n{output}"
         );
+    }
+    // -- attach picker: `a` opens it, Esc cancels, Enter confirms --
+
+    fn nav_to_links_active(app: &mut App) {
+        if let Mode::SidebarEdit {
+            field,
+            input_active,
+            ..
+        } = &mut app.mode
+        {
+            *field = SidebarField::Links;
+            *input_active = true;
+        }
+    }
+
+    /// Filter captured GraphQL requests to `query` operations that name a
+    /// mutation (handle_sidebar_edit also issues todo_pull_requests /
+    /// todo_linear_issues queries on every call, so we ignore those).
+    fn captured_mutations(
+        captures: &parking_lot::Mutex<Vec<serde_json::Value>>,
+    ) -> Vec<serde_json::Value> {
+        captures
+            .lock()
+            .iter()
+            .filter(|v| {
+                let is_mutation = v
+                    .get("query")
+                    .and_then(|q| q.as_str())
+                    .map(|q| q.starts_with("mutation"))
+                    .unwrap_or(false);
+                is_mutation
+            })
+            .cloned()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_a_on_links_opens_attach_picker_state() {
+        let (client, tx) = test_client();
+        let mut app = setup_app_with_todo();
+        app.data.pulls = vec![make_pr(10, None), make_pr(11, None)];
+        enter_sidebar_edit(&mut app);
+        nav_to_links_active(&mut app);
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('a'), &client, &tx)
+            .await
+            .unwrap();
+
+        if let Mode::SidebarEdit { attaching, .. } = &app.mode {
+            assert!(attaching, "`a` on active Links should set attaching=true");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+    }
+
+    #[test]
+    fn test_attach_picker_renders_synced_pr_candidates() {
+        let mut app = setup_app_with_todo();
+        app.data.pulls = vec![make_pr(10, None), make_pr(11, None)];
+        enter_sidebar_edit(&mut app);
+        if let Mode::SidebarEdit {
+            attaching,
+            field,
+            input_active,
+            ..
+        } = &mut app.mode
+        {
+            *attaching = true;
+            *field = SidebarField::Links;
+            *input_active = true;
+        }
+        let output = render_full(&mut app);
+        assert!(
+            output.contains("attach PRs"),
+            "picker should render an attach header:\n{output}"
+        );
+        assert!(
+            output.contains("PR #10"),
+            "candidate PR #10 should be listed:\n{output}"
+        );
+        assert!(
+            output.contains("PR #11"),
+            "candidate PR #11 should be listed:\n{output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_attach_esc_cancels_without_mutating() {
+        let (base_url, captures) = spawn_gql_mock().await;
+        let client = gql::Client::new(&base_url);
+        let (tx, _rx) = mpsc::channel(32);
+        let mut app = setup_app_with_todo();
+        app.data.pulls = vec![make_pr(10, None)];
+        enter_sidebar_edit(&mut app);
+        nav_to_links_active(&mut app);
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('a'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Esc, &client, &tx)
+            .await
+            .unwrap();
+
+        if let Mode::SidebarEdit { attaching, .. } = &app.mode {
+            assert!(!attaching, "Esc should clear attaching state");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+        // Let any spawned task run briefly; none should post a mutation.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            captured_mutations(&captures).is_empty(),
+            "Esc must not issue a mutation"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_attach_confirm_pr_posts_link_pull_request() {
+        let (base_url, captures) = spawn_gql_mock().await;
+        let client = gql::Client::new(&base_url);
+        let (tx, _rx) = mpsc::channel(32);
+        let mut app = setup_app_with_todo();
+        app.data.pulls = vec![make_pr(10, None)];
+        enter_sidebar_edit(&mut app);
+        nav_to_links_active(&mut app);
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('a'), &client, &tx)
+            .await
+            .unwrap();
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+
+        // give the spawned mutation a moment to reach the mock
+        let mut muts = Vec::new();
+        for _ in 0..40 {
+            muts = captured_mutations(&captures);
+            if !muts.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert_eq!(
+            muts.len(),
+            1,
+            "confirm should post a link mutation (captured {} requests)",
+            captures.lock().len()
+        );
+        let op_name = muts[0]
+            .get("operationName")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            op_name.contains("linkPullRequest") || op_name.contains("LinkPullRequest"),
+            "expected linkPullRequest operation, got {op_name:?}"
+        );
+        // The mutation should use the default References relation and todo id 1.
+        let vars = muts[0]
+            .get("variables")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(vars.get("todoId").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(vars.get("prId").and_then(|v| v.as_i64()), Some(10));
+        assert_eq!(
+            vars.get("relation").and_then(|v| v.as_str()),
+            Some("references"),
+            "default relation should be References"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_attach_tab_switches_to_linear_and_confirm_posts_link_linear_issue() {
+        let (base_url, captures) = spawn_gql_mock().await;
+        let client = gql::Client::new(&base_url);
+        let (tx, _rx) = mpsc::channel(32);
+        let mut app = setup_app_with_todo();
+        app.data.linears = vec![make_linear(7, None)];
+        enter_sidebar_edit(&mut app);
+        nav_to_links_active(&mut app);
+
+        super::handle_sidebar_edit(&mut app, KeyCode::Char('a'), &client, &tx)
+            .await
+            .unwrap();
+        // Tab switches to Linear kind in the picker.
+        super::handle_sidebar_edit(&mut app, KeyCode::Tab, &client, &tx)
+            .await
+            .unwrap();
+        if let Mode::SidebarEdit { link_kind, .. } = &app.mode {
+            assert_eq!(*link_kind, LinkKind::Linear, "Tab should switch to Linear");
+        } else {
+            panic!("expected SidebarEdit");
+        }
+        super::handle_sidebar_edit(&mut app, KeyCode::Enter, &client, &tx)
+            .await
+            .unwrap();
+
+        let mut muts = Vec::new();
+        for _ in 0..40 {
+            muts = captured_mutations(&captures);
+            if !muts.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert_eq!(
+            muts.len(),
+            1,
+            "confirm should post a link mutation (captured {} requests)",
+            captures.lock().len()
+        );
+        let op_name = muts[0]
+            .get("operationName")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            op_name.contains("linkLinearIssue") || op_name.contains("LinkLinearIssue"),
+            "expected linkLinearIssue operation, got {op_name:?}"
+        );
+        let vars = muts[0]
+            .get("variables")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(vars.get("todoId").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(vars.get("issueId").and_then(|v| v.as_i64()), Some(7));
     }
 }

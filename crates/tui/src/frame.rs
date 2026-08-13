@@ -775,6 +775,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         tag_caret,
         link_kind,
         link_selection,
+        attaching,
         scroll,
         ..
     } = &app.mode
@@ -787,6 +788,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     let input_active = *input_active;
     let link_kind = *link_kind;
     let link_selection = *link_selection;
+    let attaching = *attaching;
     let scroll = *scroll;
     let title_caret = *title_caret;
     let desc_caret = *desc_caret;
@@ -937,16 +939,77 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         )));
     }
     if input_active && field == crate::app::SidebarField::Links {
-        let kind_str = match link_kind {
-            crate::app::LinkKind::Pr => "PRs",
-            crate::app::LinkKind::Linear => "Issues",
-        };
-        lines.push(Line::from(Span::styled(
-            format!("  [{kind_str}] selection: {link_selection}",),
-            Style::default().fg(Palette::DIM),
-        )));
+        if attaching {
+            // Attach picker: list synced candidates for the current kind.
+            let kind_str = match link_kind {
+                crate::app::LinkKind::Pr => "PRs",
+                crate::app::LinkKind::Linear => "Issues",
+            };
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  attach {kind_str} (tab: kind · j/k: move · enter: attach · esc: cancel)"
+                ),
+                Style::default().fg(Palette::DIM),
+            )));
+            let pr_candidates = link_kind == crate::app::LinkKind::Pr;
+            let candidates_len = if pr_candidates {
+                app.data.pulls.len()
+            } else {
+                app.data.linears.len()
+            };
+            if candidates_len == 0 {
+                lines.push(Line::from(Span::styled(
+                    "  no candidates",
+                    Style::default().fg(Palette::GHOST),
+                )));
+            } else {
+                for i in 0..candidates_len {
+                    let (selected, label) = if pr_candidates {
+                        let row = &app.data.pulls[i];
+                        (
+                            i == link_selection,
+                            format!("PR #{} {}", row.number, row.title),
+                        )
+                    } else {
+                        let row = &app.data.linears[i];
+                        (
+                            i == link_selection,
+                            format!("{} {}", row.identifier, row.title),
+                        )
+                    };
+                    if selected {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                Glyph::CURSOR.to_string(),
+                                Style::default().fg(Palette::ACCENT),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(
+                                label,
+                                Style::default()
+                                    .fg(Palette::ACCENT)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            format!("  {label}"),
+                            Style::default().fg(Palette::TEXT),
+                        )));
+                    }
+                }
+            }
+        } else {
+            let kind_str = match link_kind {
+                crate::app::LinkKind::Pr => "PRs",
+                crate::app::LinkKind::Linear => "Issues",
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  [{kind_str}] selection: {link_selection}",),
+                Style::default().fg(Palette::DIM),
+            )));
+        }
     }
-    lines.push(Line::from(""));
 
     // TAGS
     let tags_header = if field == crate::app::SidebarField::Tags {
@@ -1059,6 +1122,7 @@ mod tests {
             tag_caret: 0,
             link_kind: crate::app::LinkKind::Pr,
             link_selection: 0,
+            attaching: false,
             scroll: 0,
         };
         let hints = crate::frame::status_hints(&app);
@@ -1088,6 +1152,7 @@ mod tests {
             tag_caret: 0,
             link_kind: crate::app::LinkKind::Pr,
             link_selection: 0,
+            attaching: false,
             scroll: 0,
         };
         let hints = crate::frame::status_hints(&app);

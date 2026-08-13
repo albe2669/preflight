@@ -4685,6 +4685,7 @@ dependencies = [
  "cynic",
  "cynic-codegen",
  "futures-util",
+ "parking_lot",
  "pretty_assertions",
  "ratatui",
  "reqwest",

@@ -161,6 +161,7 @@ pub(crate) async fn handle_navigate(
                     tag_caret: 0,
                     link_kind: LinkKind::Pr,
                     link_selection: 0,
+                    attaching: false,
                     scroll: 0,
                 };
                 super::fetch_detail(app, client, tx, id);

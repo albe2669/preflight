@@ -85,6 +85,7 @@ pub enum Mode {
         tag_caret: usize,
         link_kind: LinkKind,
         link_selection: usize,
+        attaching: bool,
         scroll: usize,
     },
 }
