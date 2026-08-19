@@ -135,7 +135,7 @@ export function TodayView() {
 
       {rows.length > 0 && (
         <div className={cn("space-y-0.5", ordering && "pointer-events-none opacity-60")}>
-          {rows.map((row: TodoDayPlan, i: number) => (
+          {rows.filter((row) => row.todo).map((row: TodoDayPlan, i: number) => (
             <div
               key={row.id}
               draggable

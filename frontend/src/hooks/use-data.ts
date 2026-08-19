@@ -218,10 +218,10 @@ export function useUnlinkPullRequest() {
 }
 
 export function useDismissPullRequest() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id }: { id: number }) => mutateDismissPullRequest(id),
     onSuccess: () => {
-      const qc = useQueryClient()
       qc.invalidateQueries({ queryKey: ["pulls"] })
     },
   })
@@ -259,10 +259,10 @@ export function useUnlinkLinearIssue() {
 }
 
 export function useSyncGithub() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: mutateSyncGithub,
     onSuccess: () => {
-      const qc = useQueryClient()
       qc.invalidateQueries({ queryKey: ["sync"] })
       qc.invalidateQueries({ queryKey: ["pulls"] })
     },
@@ -270,10 +270,10 @@ export function useSyncGithub() {
 }
 
 export function useSyncLinear() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: mutateSyncLinear,
     onSuccess: () => {
-      const qc = useQueryClient()
       qc.invalidateQueries({ queryKey: ["sync"] })
       qc.invalidateQueries({ queryKey: ["linears"] })
     },

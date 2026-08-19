@@ -37,8 +37,8 @@ export interface PrStateMeta {
 export const PR_STATE_META: Record<PullRequest["state"], PrStateMeta> = {
   open: { glyph: "○", label: "Open", color: "text-success" },
   closed: { glyph: "✕", label: "Closed", color: "text-muted-foreground" },
-  merged: { glyph: "◐", label: "Merged", color: "text-info" },
-  draft: { glyph: "○", label: "Draft", color: "text-muted-foreground" },
+  merged: { glyph: "◐", label: "Merged", color: "text-purple" },
+  draft: { glyph: "◌", label: "Draft", color: "text-muted-foreground" },
 }
 
 // Linear stateType → glyph + color.

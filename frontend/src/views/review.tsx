@@ -73,36 +73,36 @@ export function ReviewView() {
           <p className="text-xs text-muted-foreground/60">
             A review of the day — planned work, what was touched, completed, and carried over.
           </p>
-          {SECTIONS.map((sec) => {
-            const items = review.data![sec.key] as Todo[]
-            return (
-              <section key={sec.key}>
-                <div className="mb-2 flex items-center gap-2">
-                  <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {sec.label}
-                  </h2>
-                  <span className="text-xs text-muted-foreground/50">{items.length}</span>
-                </div>
-                {items.length === 0 ? (
-                  <p className="py-2 pl-3 text-sm text-muted-foreground/40">—</p>
-                ) : (
-                  <div className="space-y-0.5">
-                    {items.map((t) => (
-                      <TodoRow key={t.id} todo={t} compact />
-                    ))}
+          {itemsEmpty(review.data) ? (
+            <EmptyState
+              message="No data for this date."
+              hint="Pick a different date, or this day had no activity."
+            />
+          ) : (
+            SECTIONS.map((sec) => {
+              const items = review.data![sec.key] as Todo[]
+              return (
+                <section key={sec.key}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {sec.label}
+                    </h2>
+                    <span className="text-xs text-muted-foreground/50">{items.length}</span>
                   </div>
-                )}
-              </section>
-            )
-          })}
+                  {items.length === 0 ? (
+                    <p className="py-2 pl-3 text-sm text-muted-foreground/40">—</p>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {items.map((t) => (
+                        <TodoRow key={t.id} todo={t} compact />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )
+            })
+          )}
         </div>
-      )}
-
-      {!review.isLoading && !error && !review.data && itemsEmpty(review.data) && (
-        <EmptyState
-          message="No data for this date."
-          hint="Pick a different date, or this day had no activity."
-        />
       )}
     </div>
   )
