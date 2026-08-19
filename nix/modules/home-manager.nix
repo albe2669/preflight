@@ -275,6 +275,11 @@ in
               type = lib.types.nullOr lib.types.int;
               default = null;
             };
+            corsOrigins = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Origins the web frontend may call from. Empty uses the server's built-in Vite dev defaults.";
+            };
           };
         };
         default = { };

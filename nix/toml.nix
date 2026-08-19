@@ -18,78 +18,105 @@ let
   # `githubTokenPath` -> `github_token_path`). Section names like `database`,
   # `clock`, `sync`, `github` are already lowercase and pass through unchanged.
 
-  snakeCaseStr = s:
+  snakeCaseStr =
+    s:
     let
       chars = lib.stringToCharacters s;
-      go = acc: prevLower: cs:
-        if cs == [ ] then acc
-        else let
-          c = builtins.head cs;
-          rest = builtins.tail cs;
-          isUpper = c >= "A" && c <= "Z";
-          lower = lib.toLower c;
-          # Insert '_' before an uppercase letter that follows a lowercase
-          # letter or digit (camelCase boundary), or a digit after lowercase.
-          needsSep = isUpper && prevLower;
-          acc' = acc + (if needsSep then "_" else "") + lower;
-          prevLower' = !isUpper;
-        in go acc' prevLower' rest;
-    in go "" false chars;
+      go =
+        acc: prevLower: cs:
+        if cs == [ ] then
+          acc
+        else
+          let
+            c = builtins.head cs;
+            rest = builtins.tail cs;
+            isUpper = c >= "A" && c <= "Z";
+            lower = lib.toLower c;
+            # Insert '_' before an uppercase letter that follows a lowercase
+            # letter or digit (camelCase boundary), or a digit after lowercase.
+            needsSep = isUpper && prevLower;
+            acc' = acc + (if needsSep then "_" else "") + lower;
+            prevLower' = !isUpper;
+          in
+          go acc' prevLower' rest;
+    in
+    go "" false chars;
 
   # TOML literal escaping for strings (the only scalar values we emit are
   # strings, bools, and ints).
-  escapeStr = s:
-    let s' = builtins.toString s;
-    in ''"${lib.replaceStrings [ "\\" "\"" ] [ "\\\\" "\\\"" ] s'}"'';
+  escapeStr =
+    s:
+    let
+      s' = builtins.toString s;
+    in
+    ''"${lib.replaceStrings [ "\\" "\"" ] [ "\\\\" "\\\"" ] s'}"'';
 
   # `null` marks an absent optional (e.g. `*_token_path`); it is skipped so
   # the field is omitted from the emitted TOML.
   isNullValue = v: v == null;
-  scalar = v:
-    if builtins.isString v then escapeStr v
-    else if builtins.isBool v then (if v then "true" else "false")
-    else if builtins.isInt v then toString v
-    else throw "preflight: unsupported config value for TOML: ${builtins.toJSON v}";
+  scalar =
+    v:
+    if builtins.isString v then
+      escapeStr v
+    else if builtins.isBool v then
+      (if v then "true" else "false")
+    else if builtins.isInt v then
+      toString v
+    else
+      throw "preflight: unsupported config value for TOML: ${builtins.toJSON v}";
 
   # `key = value` for a single scalar leaf (skips nulls); key is snake_cased.
-  scalarLine = key: value:
-    if isNullValue value then ""
-    else "${snakeCaseStr key} = ${scalar value}\n";
+  scalarLine =
+    key: value: if isNullValue value then "" else "${snakeCaseStr key} = ${scalar value}\n";
 
   # Render one array-of-tables value under `[[<header>]]` sections.
   # `filters` rows are flat scalar attrsets (option strings + bools).
-  arrayOfTables = header: rows:
-    lib.concatStrings (map (row:
-      "[[${snakeCaseStr header}]]\n"
-      + (lib.concatStrings (lib.mapAttrsToList scalarLine row))
-    ) rows);
+  arrayOfTables =
+    header: rows:
+    lib.concatStrings (
+      map (
+        row: "[[${snakeCaseStr header}]]\n" + (lib.concatStrings (lib.mapAttrsToList scalarLine row))
+      ) rows
+    );
+
+  # Render a list value. A list of attrsets becomes array-of-tables
+  # (`[[header]]`, full dotted header); a list of scalars becomes an inline
+  # TOML array using only the leaf key name (it sits inside its section).
+  # `null` entries are dropped; a list of all-null values renders as `[]`.
+  leafName = header: lib.last (lib.splitString "." header);
+  renderList =
+    header: rows:
+    if rows == [ ] then
+      "${leafName header} = []\n"
+    else if builtins.isAttrs (builtins.head rows) then
+      arrayOfTables header rows
+    else
+      "${leafName header} = [" + lib.concatStringsSep ", " (map (v: scalar v) rows) + "]\n";
 
   # Render a section (attrset) given its full dotted header. Each entry is:
   #   - an attrset  -> nested subsection `[<header>.<name>]` (recursed)
-  #   - a list      -> array-of-tables `[[<header>.<name>]]`
+  #   - a list      -> inline array (scalars) or array-of-tables `[[..]]` (attrsets)
   #   - a scalar    -> `name = value` (nulls omitted)
-  renderSection = header: attrs:
+  renderSection =
+    header: attrs:
     let
       scalars = lib.filterAttrs (n: v: !(builtins.isAttrs v) && !(builtins.isList v)) attrs;
       subsections = lib.filterAttrs (n: v: builtins.isAttrs v) attrs;
       arrays = lib.filterAttrs (n: v: builtins.isList v) attrs;
     in
-      "[${snakeCaseStr header}]\n"
-      + (lib.concatStrings (lib.mapAttrsToList scalarLine scalars))
-      + (lib.concatStrings (lib.mapAttrsToList (n: v:
-          renderSection "${header}.${snakeCaseStr n}" v
-        ) subsections))
-      + (lib.concatStrings (lib.mapAttrsToList (n: rows:
-          arrayOfTables "${header}.${snakeCaseStr n}" rows
-        ) arrays));
-
+    "[${snakeCaseStr header}]\n"
+    + (lib.concatStrings (lib.mapAttrsToList scalarLine scalars))
+    + (lib.concatStrings (
+      lib.mapAttrsToList (n: v: renderSection "${header}.${snakeCaseStr n}" v) subsections
+    ))
+    + (lib.concatStrings (
+      lib.mapAttrsToList (n: rows: renderList "${header}.${snakeCaseStr n}" rows) arrays
+    ));
 
   # Render a full config tree (top-level section names) into a TOML string.
   # `cfg` is `{ database = {..}; clock = {..}; sync = {..}; server = {..}; }`.
-  renderToml = cfg:
-    lib.concatStrings (lib.mapAttrsToList (section: attrs:
-      renderSection section attrs
-    ) cfg);
+  renderToml =
+    cfg: lib.concatStrings (lib.mapAttrsToList (section: attrs: renderSection section attrs) cfg);
 
 in
 {

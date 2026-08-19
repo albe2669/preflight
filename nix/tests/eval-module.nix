@@ -62,6 +62,10 @@ let
         config.programs.preflight.enable = true;
         config.programs.preflight.settings.logging.level = "DEBUG";
         config.programs.preflight.settings.logging.directory = "/var/log/preflight";
+        config.programs.preflight.settings.server.corsOrigins = [
+          "https://preflight.example.com"
+          "http://localhost:5173"
+        ];
       })
     ];
   };
@@ -104,4 +108,10 @@ in
   loggingOverrideOk =
     lib.hasInfix "level = \"DEBUG\"" renderedOverride
     && lib.hasInfix "directory = \"/var/log/preflight\"" renderedOverride;
+
+  # Default server cors_origins renders as an empty inline array
+  corsDefaultOk = lib.hasInfix "cors_origins = []" rendered;
+
+  # Override cors_origins renders as an inline TOML array of strings
+  corsOverrideOk = lib.hasInfix "cors_origins = [\"https://preflight.example.com\", \"http://localhost:5173\"]" renderedOverride;
 }
