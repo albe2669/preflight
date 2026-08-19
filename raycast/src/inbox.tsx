@@ -18,13 +18,16 @@ import {
   fetchLinearIssues,
   fetchPullRequests,
   fetchSyncStates,
+  fetchTodos,
   GraphqlError,
+  linkLinearIssue,
+  linkPullRequest,
   syncGithub,
   syncLinear,
   todoFromLinearIssue,
   todoFromPullRequest,
 } from "./lib/graphql";
-import { linearStateTypeVisual, prBadge, prStateVisual, relativeTime } from "./lib/helpers";
+import { linearStateTypeVisual, prBadge, prStateVisual, relativeTime, statusVisual } from "./lib/helpers";
 import { useFetch } from "./hooks/useFetch";
 import type { LinearIssue, PullRequest, SyncState } from "./types";
 
@@ -210,6 +213,86 @@ function SyncRow({
   );
 }
 
+/** Run a triage mutation with a toast; refresh the list only on success. */
+async function triage(label: string, fn: () => Promise<unknown>, onDone: () => void) {
+  const toast = await showToast({ style: Toast.Style.Animated, title: label });
+  try {
+    await fn();
+    toast.title = "Done";
+    toast.style = Toast.Style.Success;
+    await showToast(toast);
+    onDone();
+  } catch (e) {
+    toast.style = Toast.Style.Failure;
+    toast.title = `Could not ${label.toLowerCase()}`;
+    toast.message =
+      e instanceof GraphqlError ? e.message : e instanceof TypeError ? "Backend unreachable" : String(e);
+    await showToast(toast);
+  }
+}
+
+/** Picker pushed by "Link to Todo": lists todos and links the chosen one. */
+function LinkTodoList({
+  title,
+  onLink,
+}: {
+  title: string;
+  onLink: (todoId: number) => Promise<void>;
+}) {
+  const { data, loading, error, unreachable } = useFetch(() => fetchTodos(), []);
+  const todos = data ?? [];
+  return (
+    <List
+      isLoading={loading}
+      searchBarPlaceholder={`Link: ${title}`}
+    >
+      {unreachable ? (
+        <List.EmptyView
+          icon={{ source: Icon.ExclamationMark, tintColor: Color.Red }}
+          title="Backend unreachable"
+          description="Start the preflight server, then refresh."
+        />
+      ) : error ? (
+        <List.EmptyView
+          icon={{ source: Icon.ExclamationMark, tintColor: Color.Orange }}
+          title="Could not load todos"
+          description={error}
+        />
+      ) : todos.length === 0 && !loading ? (
+        <List.EmptyView
+          icon={{ source: Icon.CheckCircle, tintColor: Color.SecondaryText }}
+          title="No todos to link"
+          description="Create a todo first, then link this item."
+        />
+      ) : null}
+      <List.Section title={`Todos · ${todos.length}`}>
+        {todos.map((t) => {
+          const v = statusVisual(t.status);
+          return (
+            <List.Item
+              key={t.id}
+              title={t.title}
+              icon={{ source: v.icon, tintColor: v.color }}
+              accessories={[{ tag: v.label }]}
+              actions={
+                <ActionPanel>
+                  <Action
+                    title="Link to This Todo"
+                    icon={Icon.Link}
+                    onAction={async () => {
+                      await triage("Linking", () => onLink(t.id), () => {});
+                    }}
+                  />
+                </ActionPanel>
+              }
+            />
+          );
+        })}
+      </List.Section>
+    </List>
+  );
+}
+
 function PrRow({ pr, onDone }: { pr: PullRequest; onDone: () => void }) {
   const v = prStateVisual(pr.state);
   const accessories: List.Item.Accessory[] = [
@@ -231,18 +314,24 @@ function PrRow({ pr, onDone }: { pr: PullRequest; onDone: () => void }) {
             <Action
               title="Convert to Todo (plan today)"
               icon={Icon.Plus}
-              onAction={async () => {
-                await todoFromPullRequest(pr.id, true);
-                onDone();
-              }}
+              onAction={() => triage("Converting", () => todoFromPullRequest(pr.id, true), onDone)}
             />
             <Action
               title="Convert to Todo (backlog)"
               icon={Icon.PlusCircle}
-              onAction={async () => {
-                await todoFromPullRequest(pr.id, false);
-                onDone();
-              }}
+              onAction={() => triage("Converting", () => todoFromPullRequest(pr.id, false), onDone)}
+            />
+            <Action.Push
+              title="Link to Todo…"
+              icon={Icon.Link}
+              target={
+                <LinkTodoList
+                  title={pr.title}
+                  onLink={(todoId) =>
+                    linkPullRequest(todoId, pr.id, "references").then(() => onDone())
+                  }
+                />
+              }
             />
             <Action
               title="Dismiss"
@@ -251,8 +340,7 @@ function PrRow({ pr, onDone }: { pr: PullRequest; onDone: () => void }) {
                 if (
                   await confirmAlert({ title: "Dismiss this PR?", primaryAction: { title: "Dismiss" } })
                 ) {
-                  await dismissPullRequest(pr.id);
-                  onDone();
+                  await triage("Dismissing", () => dismissPullRequest(pr.id), onDone);
                 }
               }}
             />
@@ -286,18 +374,24 @@ function LinearRow({ issue, onDone }: { issue: LinearIssue; onDone: () => void }
             <Action
               title="Convert to Todo (plan today)"
               icon={Icon.Plus}
-              onAction={async () => {
-                await todoFromLinearIssue(issue.id, true);
-                onDone();
-              }}
+              onAction={() => triage("Converting", () => todoFromLinearIssue(issue.id, true), onDone)}
             />
             <Action
               title="Convert to Todo (backlog)"
               icon={Icon.PlusCircle}
-              onAction={async () => {
-                await todoFromLinearIssue(issue.id, false);
-                onDone();
-              }}
+              onAction={() => triage("Converting", () => todoFromLinearIssue(issue.id, false), onDone)}
+            />
+            <Action.Push
+              title="Link to Todo…"
+              icon={Icon.Link}
+              target={
+                <LinkTodoList
+                  title={issue.title}
+                  onLink={(todoId) =>
+                    linkLinearIssue(todoId, issue.id).then(() => onDone())
+                  }
+                />
+              }
             />
           </ActionPanel.Section>
           <ActionPanel.Section>

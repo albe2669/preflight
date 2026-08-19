@@ -52,6 +52,15 @@
       "default": "4",
       "required": false,
       "placeholder": "4"
+    },
+    {
+      "name": "timezone",
+      "title": "Server Timezone",
+      "description": "IANA timezone the preflight server uses to compute the logical date (e.g. America/Los_Angeles).",
+      "type": "textfield",
+      "default": "America/Los_Angeles",
+      "required": false,
+      "placeholder": "America/Los_Angeles"
     }
   ],
   "dependencies": {

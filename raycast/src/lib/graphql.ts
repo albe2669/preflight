@@ -15,7 +15,6 @@ import type {
   Tag,
   Todo,
   TodoDayPlan,
-  TodoEvent,
   TodoLinearIssue,
   TodoPullRequest,
   TodoStatus,
@@ -107,19 +106,6 @@ export async function fetchTodos(): Promise<Todo[]> {
   return data.todo.nodes;
 }
 
-export async function fetchTodoById(id: number): Promise<Todo | null> {
-  const data = await request<{ todo: Connection<Todo> }>(
-    `query($filters: TodoFilterInput) { todo(filters: $filters) { nodes { ${TODO_FIELDS} } } }`,
-    { filters: { id: { eq: id } } },
-  );
-  return data.todo.nodes[0] ?? null;
-}
-
-export async function fetchAllTags(): Promise<Tag[]> {
-  const data = await request<{ tag: Connection<Tag> }>(`{ tag { nodes { ${TAG_FIELDS} } } }`);
-  return data.tag.nodes;
-}
-
 export async function fetchTodoTags(todoId: number): Promise<Tag[]> {
   const data = await request<{ todoTag: Connection<{ tag: Tag | null }> }>(
     `query($filters: TodoTagFilterInput) {
@@ -156,21 +142,6 @@ export async function fetchTodoLinearIssues(todoId: number): Promise<TodoLinearI
     { filters: { todoId: { eq: todoId } } },
   );
   return data.todoLinearIssue.nodes;
-}
-
-export async function fetchTodoEvents(todoId: number): Promise<TodoEvent[]> {
-  const data = await request<{ todoEvent: Connection<TodoEvent> }>(
-    `query($filters: TodoEventFilterInput, $orderBy: TodoEventOrderInput) {
-      todoEvent(filters: $filters, orderBy: $orderBy) {
-        nodes { id todoId kind field oldValue newValue actor occurredAt logicalDate }
-      }
-    }`,
-    {
-      filters: { todoId: { eq: todoId } },
-      orderBy: { occurredAt: "ASC" as OrderBy },
-    },
-  );
-  return data.todoEvent.nodes;
 }
 
 export async function fetchPullRequests(): Promise<PullRequest[]> {
@@ -228,16 +199,6 @@ export async function createTodo(title: string, description?: string): Promise<T
   return data.createTodo;
 }
 
-export async function updateTodo(id: number, title?: string, description?: string): Promise<Todo> {
-  const data = await request<{ updateTodo: Todo }>(
-    `mutation($id: Int!, $title: String, $description: String) {
-      updateTodo(id: $id, title: $title, description: $description) { ${TODO_FIELDS} }
-    }`,
-    { id, title: title ?? null, description: description ?? null },
-  );
-  return data.updateTodo;
-}
-
 export async function setTodoStatus(id: number, status: TodoStatus, blockedReason?: string): Promise<Todo> {
   const data = await request<{ setTodoStatus: Todo }>(
     `mutation($id: Int!, $status: TodoStatusEnum!, $blockedReason: String) {
@@ -284,16 +245,6 @@ export async function addTag(todoId: number, slug: string): Promise<Todo> {
     { todoId, slug },
   );
   return data.addTag;
-}
-
-export async function removeTag(todoId: number, slug: string): Promise<Todo> {
-  const data = await request<{ removeTag: Todo }>(
-    `mutation($todoId: Int!, $slug: String!) {
-      removeTag(todoId: $todoId, slug: $slug) { ${TODO_FIELDS} }
-    }`,
-    { todoId, slug },
-  );
-  return data.removeTag;
 }
 
 export async function todoFromPullRequest(pullRequestId: number, planToday: boolean): Promise<Todo> {

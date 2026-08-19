@@ -2,7 +2,7 @@
  * Shared helpers: logical date, status glyphs/icons/colors, link badges.
  * Color is always a secondary cue; a glyph or icon carries the meaning.
  */
-import { Color, Icon } from "@raycast/api";
+import { Color, Icon, getPreferenceValues } from "@raycast/api";
 import type {
   TodoStatus,
   PrState,
@@ -11,22 +11,59 @@ import type {
   LinkRelation,
 } from "../types";
 
-/**
- * Logical date for an instant. The day starts at `dayStartHour` local, not
- * midnight: work at 02:00 with dayStartHour=4 counts as the prior day.
- * Mirrors crates/todo/src/clock.rs.
- */
-export function logicalDate(at: Date, dayStartHour: number): string {
-  const copy = new Date(at.getTime());
-  copy.setHours(copy.getHours() - dayStartHour, 0, 0, 0);
-  const y = copy.getFullYear();
-  const m = String(copy.getMonth() + 1).padStart(2, "0");
-  const d = String(copy.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+const DEFAULT_DAY_START_HOUR = 4;
+const DEFAULT_TIMEZONE = "America/Los_Angeles";
+
+interface Prefs {
+  "day-start-hour"?: string;
+  timezone?: string;
 }
 
-export function todayLogical(dayStartHour: number): string {
-  return logicalDate(new Date(), dayStartHour);
+/** Read the day-start-hour preference (0-23), default 4. */
+export function dayStartHour(): number {
+  const raw = getPreferenceValues<Prefs>()["day-start-hour"];
+  const n = raw != null ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : DEFAULT_DAY_START_HOUR;
+}
+
+/** Read the server IANA timezone preference, default America/Los_Angeles. */
+export function preferredTimeZone(): string {
+  return getPreferenceValues<Prefs>().timezone || DEFAULT_TIMEZONE;
+}
+
+/**
+ * Logical date for an instant in a given IANA zone. The day starts at
+ * `dayStartHour` wall-clock, not midnight: work at 02:00 with dayStartHour=4
+ * counts as the prior day. Mirrors crates/todo/src/clock.rs.
+ */
+export function logicalDate(at: Date, dayStartHour: number, timeZone: string): string {
+  // Wall-clock parts in the target zone.
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(at);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  let y = get("year");
+  let m = get("month");
+  let d = get("day");
+  const hour = get("hour") % 24; // hour12 "24" maps to 0
+  // Before dayStartHour, the logical day is the prior calendar day.
+  if (hour < dayStartHour) {
+    const prev = new Date(Date.UTC(y, m - 1, d) - 86400000);
+    y = prev.getUTCFullYear();
+    m = prev.getUTCMonth() + 1;
+    d = prev.getUTCDate();
+  }
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** Logical date for now, using the day-start-hour and timezone preferences. */
+export function todayLogical(): string {
+  return logicalDate(new Date(), dayStartHour(), preferredTimeZone());
 }
 
 // ---- Todo status: glyph + icon + color ----

@@ -3,7 +3,7 @@
  * plus the common actions (toggle plan, add tag, open links). One source of
  * truth for the status menu so Today, Inbox-converted, and MenuBar agree.
  */
-import { Action, ActionPanel, Icon, Color } from "@raycast/api";
+import { Action, ActionPanel } from "@raycast/api";
 import { TODO_STATUSES, statusVisual } from "./helpers";
 import type { TodoStatus } from "../types";
 
@@ -29,8 +29,4 @@ export function SetStatusAction({
       })}
     </ActionPanel.Section>
   );
-}
-
-export function OpenLinkAction({ url, title }: { url: string; title: string }) {
-  return <Action.OpenInBrowser title={title} url={url} icon={{ source: Icon.Link, tintColor: Color.Blue }} />;
 }

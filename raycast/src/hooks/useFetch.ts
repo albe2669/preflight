@@ -23,6 +23,7 @@ export function useFetch<T>(loader: () => Promise<T>, deps: unknown[] = []): Fet
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cause, setCause] = useState<unknown>(null);
   const [tick, setTick] = useState(0);
 
   const loaderRef = useRef(loader);
@@ -34,6 +35,7 @@ export function useFetch<T>(loader: () => Promise<T>, deps: unknown[] = []): Fet
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setCause(null);
     loaderRef
       .current()
       .then((result) => {
@@ -46,6 +48,7 @@ export function useFetch<T>(loader: () => Promise<T>, deps: unknown[] = []): Fet
         const msg = e instanceof Error ? e.message : String(e);
         setData(null);
         setError(msg);
+        setCause(e);
         setLoading(false);
       });
     return () => {
@@ -54,7 +57,7 @@ export function useFetch<T>(loader: () => Promise<T>, deps: unknown[] = []): Fet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, ...deps]);
 
-  const unreachable = error != null && isUnreachable(error);
+  const unreachable = cause != null && isUnreachable(cause);
   return { data, loading, error, unreachable, reload };
 }
 

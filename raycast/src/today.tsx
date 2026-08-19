@@ -30,11 +30,8 @@ import { SetStatusAction } from "./lib/actions";
 import { useFetch } from "./hooks/useFetch";
 import type { TodoStatus } from "./types";
 
-const DAY_START_HOUR = 4;
-
-
 export default function TodayCommand() {
-  const date = useMemo(() => todayLogical(DAY_START_HOUR), []);
+  const date = useMemo(() => todayLogical(), []);
   const { data, loading, error, unreachable, reload } = useFetch(() => fetchTodayPlan(date), []);
   const [showCreate, setShowCreate] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
@@ -46,6 +43,7 @@ export default function TodayCommand() {
     toast.title = title;
     toast.style = Toast.Style.Success;
     await showToast(toast);
+    setOrder(null);
     reload();
   }
 
@@ -98,6 +96,7 @@ export default function TodayCommand() {
       toast.title = "Order saved";
       toast.style = Toast.Style.Success;
       await showToast(toast);
+      setOrder(null);
       reload();
     } catch (e) {
       await failToast(e, "Could not reorder");

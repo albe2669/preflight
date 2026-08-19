@@ -7,7 +7,6 @@ import {
   Icon,
   LaunchType,
   MenuBarExtra,
-  getPreferenceValues,
   launchCommand,
 } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
@@ -15,25 +14,13 @@ import { fetchSyncStates, fetchTodayPlan, setTodoStatus, createTodo } from "./li
 import { statusVisual, todayLogical } from "./lib/helpers";
 import type { PlanRow, SyncState } from "./types";
 
-const DEFAULT_DAY_START_HOUR = 4;
-
-interface Prefs {
-  "day-start-hour"?: string;
-}
-
-function dayStartHour(): number {
-  const raw = getPreferenceValues<Prefs>()["day-start-hour"];
-  const n = raw != null ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : DEFAULT_DAY_START_HOUR;
-}
-
 interface MenuBarState {
   plan: PlanRow[];
   sync: SyncState[];
 }
 
 async function load(): Promise<MenuBarState> {
-  const date = todayLogical(dayStartHour());
+  const date = todayLogical();
   const [plan, sync] = await Promise.all([fetchTodayPlan(date), fetchSyncStates()]);
   return { plan, sync };
 }
@@ -75,7 +62,7 @@ export default function MenuBarCommand() {
     };
   }, [reloadTick]);
 
-  const date = useMemo(() => todayLogical(dayStartHour()), []);
+  const date = useMemo(() => todayLogical(), []);
   const count = state?.plan.length ?? 0;
   const done = state?.plan.filter((r) => r.todo?.status === "done").length ?? 0;
   const errored = err != null;
@@ -193,9 +180,9 @@ export default function MenuBarCommand() {
             />
           </MenuBarExtra.Section>
 
-          {state!.sync.length > 0 && (
+          {state != null && state.sync.length > 0 && (
             <MenuBarExtra.Section title="Sync">
-              {syncSummary(state!.sync).map((s) => (
+              {syncSummary(state.sync).map((s) => (
                 <MenuBarExtra.Item
                   key={s.label}
                   title={s.label}

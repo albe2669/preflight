@@ -9,8 +9,6 @@ import { statusVisual, todayLogical } from "./lib/helpers";
 import { useFetch } from "./hooks/useFetch";
 import type { Todo } from "./types";
 
-const DAY_START_HOUR = 4;
-
 function shiftDays(date: string, days: number): string {
   const d = new Date(`${date}T12:00:00`);
   d.setDate(d.getDate() + days);
@@ -18,7 +16,7 @@ function shiftDays(date: string, days: number): string {
 }
 
 export default function ReviewCommand() {
-  const [date, setDate] = useState<string>(() => todayLogical(DAY_START_HOUR));
+  const [date, setDate] = useState<string>(() => todayLogical());
   const { data, loading, error, unreachable, reload } = useFetch(() => fetchDailyReview(date), [date]);
 
   function shiftDate(days: number) {
@@ -46,7 +44,7 @@ export default function ReviewCommand() {
             title="Today"
             icon={Icon.Calendar}
             shortcut={{ modifiers: ["cmd"], key: "t" }}
-            onAction={() => setDate(todayLogical(DAY_START_HOUR))}
+            onAction={() => setDate(todayLogical())}
           />
           <Action title="Refresh" icon={Icon.ArrowClockwise} onAction={reload} />
         </ActionPanel>
