@@ -90,6 +90,25 @@ pub struct ServerConfig {
     pub port: u16,
     pub depth_limit: Option<usize>,
     pub complexity_limit: Option<usize>,
+    #[serde(default)]
+    pub cors_origins: Vec<String>,
+}
+
+impl ServerConfig {
+    /// Origins the web frontend may call from. Defaults to the common Vite
+    /// dev ports so a source checkout works without extra config.
+    pub fn allowed_origins(&self) -> Vec<String> {
+        if self.cors_origins.is_empty() {
+            vec![
+                "http://localhost:5173".into(),
+                "http://127.0.0.1:5173".into(),
+                "http://localhost:4173".into(),
+                "http://127.0.0.1:4173".into(),
+            ]
+        } else {
+            self.cors_origins.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -561,5 +580,59 @@ directory = "/tmp/logs"
         let cfg = Config::from_content(toml).unwrap();
         assert_eq!(cfg.logging.level, "debug");
         assert_eq!(cfg.logging.directory, "/tmp/logs");
+    }
+
+    #[test]
+    fn test_cors_origins_default_when_unset() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = []
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        let origins = cfg.server.allowed_origins();
+        assert!(
+            origins.contains(&"http://localhost:5173".to_string()),
+            "default should allow the Vite dev origin: {origins:?}"
+        );
+    }
+
+    #[test]
+    fn test_cors_origins_explicit_override() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = []
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+cors_origins = ["https://preflight.example.com"]
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        assert_eq!(
+            cfg.server.allowed_origins(),
+            vec!["https://preflight.example.com".to_string()]
+        );
     }
 }

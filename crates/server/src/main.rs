@@ -115,8 +115,8 @@ async fn main() -> anyhow::Result<()> {
     .finish()
     .map_err(|e| anyhow::anyhow!("schema build failed: {e:?}"))?;
 
-    let app = routes::router(schema);
     let addr = format!("{}:{}", cfg.server.host, cfg.server.port);
+    let app = routes::router(schema, &cfg.server.allowed_origins());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("GraphQL Playground at http://{addr}");
     axum::serve(listener, app).await?;
