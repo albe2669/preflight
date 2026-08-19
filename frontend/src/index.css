@@ -34,6 +34,7 @@
   --ring: oklch(0.55 0.11 240);
   --success: oklch(0.65 0.14 150);
   --warning: oklch(0.72 0.14 75);
+  --info: oklch(0.62 0.13 240);
   --purple: oklch(0.62 0.13 290);
 }
 
