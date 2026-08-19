@@ -635,4 +635,28 @@ cors_origins = ["https://preflight.example.com"]
             vec!["https://preflight.example.com".to_string()]
         );
     }
+
+    #[test]
+    fn test_cors_origins_wildcard_parses() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = []
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+cors_origins = ["*"]
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        assert_eq!(cfg.server.allowed_origins(), vec!["*".to_string()]);
+    }
 }

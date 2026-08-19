@@ -30,12 +30,19 @@ pub fn router(schema: Schema, cors_origins: &[String]) -> Router {
 /// cross-origin callers; the GraphQL endpoint stays reachable from same-origin
 /// tools (curl, the TUI, Raycast).
 fn build_cors(origins: &[String]) -> CorsLayer {
-    let parsed: Vec<HeaderValue> = origins
-        .iter()
-        .filter_map(|o| HeaderValue::from_str(o).ok())
-        .collect();
+    // "*" is the canonical "allow any origin" value; tower_http's
+    // `AllowOrigin::list` panics on a wildcard, so route it to `any()`.
+    let allow_origin = if origins.iter().any(|o| o == "*") {
+        AllowOrigin::any()
+    } else {
+        let parsed: Vec<HeaderValue> = origins
+            .iter()
+            .filter_map(|o| HeaderValue::from_str(o).ok())
+            .collect();
+        AllowOrigin::list(parsed)
+    };
     CorsLayer::new()
-        .allow_origin(AllowOrigin::list(parsed))
+        .allow_origin(allow_origin)
         .allow_headers([
             axum::http::HeaderName::from_static("content-type"),
             axum::http::HeaderName::from_static("authorization"),

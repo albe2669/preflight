@@ -88,7 +88,24 @@ let
     logging = settings.logging;
   };
   launcherNames = map (p: p.name) eval.config.home.packages;
+
+  # Render assertions (enforced via `assert` below the `in`).
+  loggingDefaultOk =
+    lib.hasInfix "[logging]" rendered
+    && lib.hasInfix "level = \"info\"" rendered
+    && lib.hasInfix "directory = \"/home/u/.local/state/preflight/logs\"" rendered;
+  loggingOverrideOk =
+    lib.hasInfix "level = \"DEBUG\"" renderedOverride
+    && lib.hasInfix "directory = \"/var/log/preflight\"" renderedOverride;
+  corsDefaultOk = lib.hasInfix "cors_origins = []" rendered;
+  corsOverrideOk = lib.hasInfix "cors_origins = [\"https://preflight.example.com\", \"http://localhost:5173\"]" renderedOverride;
 in
+# Enforce the render assertions: a false value aborts evaluation so a
+# toml.nix regression cannot pass silently.
+assert loggingDefaultOk;
+assert loggingOverrideOk;
+assert corsDefaultOk;
+assert corsOverrideOk;
 {
   dbPath = settings.database.path;
   host = settings.server.host;
@@ -96,22 +113,10 @@ in
   tz = settings.clock.timezone;
   launcherNames = launcherNames;
   renderedConfig = rendered;
-
-  # Default logging: section present with app defaults (dir defaults to the
-  # state path, mirroring the database path, since packaged mode has no root)
-  loggingDefaultOk =
-    lib.hasInfix "[logging]" rendered
-    && lib.hasInfix "level = \"info\"" rendered
-    && lib.hasInfix "directory = \"/home/u/.local/state/preflight/logs\"" rendered;
-
-  # Override logging: custom level and directory render correctly
-  loggingOverrideOk =
-    lib.hasInfix "level = \"DEBUG\"" renderedOverride
-    && lib.hasInfix "directory = \"/var/log/preflight\"" renderedOverride;
-
-  # Default server cors_origins renders as an empty inline array
-  corsDefaultOk = lib.hasInfix "cors_origins = []" rendered;
-
-  # Override cors_origins renders as an inline TOML array of strings
-  corsOverrideOk = lib.hasInfix "cors_origins = [\"https://preflight.example.com\", \"http://localhost:5173\"]" renderedOverride;
+  inherit
+    loggingDefaultOk
+    loggingOverrideOk
+    corsDefaultOk
+    corsOverrideOk
+    ;
 }
