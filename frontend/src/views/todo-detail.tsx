@@ -5,12 +5,20 @@
 import { useParams, Link } from "react-router-dom"
 import { useState } from "react"
 import { toast } from "sonner"
-import { ArrowLeft, Plus, X } from "lucide-react"
+import { ArrowLeft, Plus, X, Link2, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { cn } from "@/lib/utils"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -29,10 +37,13 @@ import {
   useSetTodoStatus,
   useAddTag,
   useRemoveTag,
+  usePullRequests,
+  useLinkPullRequest,
+  useUnlinkPullRequest,
 } from "@/hooks/use-data"
-import { ACTOR_META, eventLabel, absTime } from "@/lib/status"
+import { ACTOR_META, eventLabel, absTime, PR_STATE_META } from "@/lib/status"
 import { STATUS_ORDER } from "@/lib/status"
-import type { TodoStatus } from "@/types"
+import type { LinkRelation, TodoStatus } from "@/types"
 
 export function TodoDetailView() {
   const { id } = useParams<{ id: string }>()
@@ -48,6 +59,9 @@ export function TodoDetailView() {
   const setStatus = useSetTodoStatus()
   const addTag = useAddTag()
   const removeTag = useRemoveTag()
+  const allPulls = usePullRequests()
+  const linkPr = useLinkPullRequest()
+  const unlinkPr = useUnlinkPullRequest()
 
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState("")
@@ -55,6 +69,9 @@ export function TodoDetailView() {
   const [blockedReason, setBlockedReason] = useState("")
   const [newTag, setNewTag] = useState("")
   const [dismissedErr, setDismissedErr] = useState(false)
+  const [linkPrOpen, setLinkPrOpen] = useState(false)
+  const [prSearch, setPrSearch] = useState("")
+  const [linkRelation, setLinkRelation] = useState<LinkRelation>("references")
 
   const todo = todos.data?.find((t) => t.id === todoId)
 
@@ -108,6 +125,35 @@ export function TodoDetailView() {
       toast.error("Could not remove tag")
     }
   }
+
+  const handleLinkPr = async (pullRequestId: number) => {
+    try {
+      await linkPr.mutateAsync({ todoId, pullRequestId, relation: linkRelation })
+      toast.success("PR linked")
+      setLinkPrOpen(false)
+      setPrSearch("")
+    } catch {
+      toast.error("Could not link PR")
+    }
+  }
+
+  const handleUnlinkPr = async (pullRequestId: number) => {
+    try {
+      await unlinkPr.mutateAsync({ todoId, pullRequestId })
+      toast.success("PR unlinked")
+    } catch {
+      toast.error("Could not unlink PR")
+    }
+  }
+
+  const linkedPrIds = new Set(pulls.data?.map((tp) => tp.pullRequestId) ?? [])
+  const filteredPrs = (allPulls.data ?? [])
+    .filter((p) => !linkedPrIds.has(p.id))
+    .filter((p) => {
+      if (!prSearch) return true
+      const q = prSearch.toLowerCase()
+      return p.title.toLowerCase().includes(q) || `${p.owner}/${p.repo}#${p.number}`.toLowerCase().includes(q)
+    })
 
   if (todos.isLoading) return <LoadingRow label="Loading todo…" />
   if (todos.error && !dismissedErr)
@@ -243,21 +289,90 @@ export function TodoDetailView() {
 
       {/* Linked PRs */}
       <section className="mb-6">
-        <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Linked pull requests
-        </h2>
+        <div className="mb-2 flex items-center gap-2">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Linked pull requests
+          </h2>
+          <Dialog open={linkPrOpen} onOpenChange={setLinkPrOpen}>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-5 text-xs text-muted-foreground">
+                <Link2 className="size-3" />Link PR
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Link pull request</DialogTitle>
+              </DialogHeader>
+              <Select value={linkRelation} onValueChange={(v) => setLinkRelation(v as LinkRelation)}>
+                <SelectTrigger className="w-full text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="references">references</SelectItem>
+                  <SelectItem value="reviews">reviews</SelectItem>
+                  <SelectItem value="implements">implements</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={prSearch}
+                  onChange={(e) => setPrSearch(e.target.value)}
+                  placeholder="Search PRs…"
+                  className="pl-7 text-sm"
+                />
+              </div>
+              <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                {allPulls.isLoading && <LoadingRow label="Loading PRs…" />}
+                {filteredPrs.length === 0 && !allPulls.isLoading && (
+                  <p className="py-4 text-center text-sm text-muted-foreground/40">
+                    {linkedPrIds.size === 0 && !prSearch ? "No PRs available." : "No matches."}
+                  </p>
+                )}
+                {filteredPrs.map((p) => {
+                  const meta = PR_STATE_META[p.state]
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleLinkPr(p.id)}
+                      disabled={linkPr.isPending}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary/40 disabled:opacity-50"
+                    >
+                      <span className={cn("font-mono text-sm", meta.color)}>{meta.glyph}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{p.title}</span>
+                        <span className="block font-mono text-[11px] text-muted-foreground">
+                          {p.owner}/{p.repo}#{p.number}
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
         {pulls.data && pulls.data.length > 0 ? (
           <div className="space-y-1">
             {pulls.data.map((tp) =>
               tp.pullRequest ? (
-                <div key={tp.pullRequestId} className="flex items-center gap-2">
+                <div key={tp.pullRequestId} className="flex items-center gap-1">
                   <PrBadge
                     owner={tp.pullRequest.owner}
                     repo={tp.pullRequest.repo}
                     number={tp.pullRequest.number}
                     relation={tp.relation}
                     url={tp.pullRequest.url}
+                    changesRequested={tp.pullRequest.changesRequested}
+                    copilotComments={tp.pullRequest.copilotComments}
+                    mergeConflicts={tp.pullRequest.mergeConflicts}
                   />
+                  <button
+                    onClick={() => handleUnlinkPr(tp.pullRequestId)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-3" />
+                  </button>
                 </div>
               ) : null,
             )}

@@ -1,10 +1,7 @@
-// Shared small presentational components: status glyph, tag chip, link
-// badge, empty state, loading skeleton, error banner.
-
-import { AlertCircle, Inbox, Loader2 } from "lucide-react"
+import { AlertCircle, Bot, GitMerge, Inbox, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { statusMeta, RELATION_META } from "@/lib/status"
+import { statusMeta, RELATION_META, PR_REVIEW_STATUS_META } from "@/lib/status"
 import type { TodoStatus } from "@/types"
 
 // ---- Status glyph ----
@@ -45,18 +42,32 @@ export function PrBadge({
   number,
   relation,
   url,
+  changesRequested,
+  copilotComments,
+  mergeConflicts,
 }: {
   owner: string
   repo: string
   number: number
   relation?: string
   url?: string
+  changesRequested?: boolean
+  copilotComments?: boolean
+  mergeConflicts?: boolean
 }) {
   const rel = relation ? RELATION_META[relation] : null
   const content = (
     <span className="font-mono text-[11px] text-muted-foreground">
       {owner}/{repo}#{number}
       {rel && <span className="ml-1 text-info">{rel.glyph}</span>}
+      {(changesRequested || copilotComments || mergeConflicts) && (
+        <PrStatusIcons
+          changesRequested={changesRequested}
+          copilotComments={copilotComments}
+          mergeConflicts={mergeConflicts}
+          className="ml-1 inline-flex"
+        />
+      )}
     </span>
   )
   if (url) {
@@ -67,6 +78,32 @@ export function PrBadge({
     )
   }
   return content
+}
+
+const PR_STATUS_ICONS = {
+  changesRequested: { Icon: AlertCircle, ...PR_REVIEW_STATUS_META.changesRequested },
+  copilotComments: { Icon: Bot, ...PR_REVIEW_STATUS_META.copilotComments },
+  mergeConflicts: { Icon: GitMerge, ...PR_REVIEW_STATUS_META.mergeConflicts },
+} as const
+
+export function PrStatusIcons({
+  changesRequested,
+  copilotComments,
+  mergeConflicts,
+  className,
+}: {
+  changesRequested?: boolean
+  copilotComments?: boolean
+  mergeConflicts?: boolean
+  className?: string
+}) {
+  return (
+    <span className={cn("inline-flex items-center gap-0.5", className)}>
+      {changesRequested && <PR_STATUS_ICONS.changesRequested.Icon className={cn("size-3", PR_STATUS_ICONS.changesRequested.color)} />}
+      {copilotComments && <PR_STATUS_ICONS.copilotComments.Icon className={cn("size-3", PR_STATUS_ICONS.copilotComments.color)} />}
+      {mergeConflicts && <PR_STATUS_ICONS.mergeConflicts.Icon className={cn("size-3", PR_STATUS_ICONS.mergeConflicts.color)} />}
+    </span>
+  )
 }
 
 export function LinearBadge({

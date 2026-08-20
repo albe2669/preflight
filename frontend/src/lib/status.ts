@@ -41,6 +41,19 @@ export const PR_STATE_META: Record<PullRequest["state"], PrStateMeta> = {
   draft: { glyph: "◌", label: "Draft", color: "text-muted-foreground" },
 }
 
+// PR review-status flags → lucide icon name + semantic color.
+export interface PrReviewStatusMeta {
+  icon: "AlertCircle" | "Bot" | "GitMerge"
+  label: string
+  color: string
+}
+
+export const PR_REVIEW_STATUS_META = {
+  changesRequested: { icon: "AlertCircle", label: "Changes requested", color: "text-warning" } as PrReviewStatusMeta,
+  copilotComments: { icon: "Bot", label: "Copilot comments", color: "text-info" } as PrReviewStatusMeta,
+  mergeConflicts: { icon: "GitMerge", label: "Merge conflicts", color: "text-destructive" } as PrReviewStatusMeta,
+} as const
+
 // Linear stateType → glyph + color.
 export interface LinearStateMeta {
   glyph: string

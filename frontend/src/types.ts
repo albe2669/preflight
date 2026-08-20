@@ -72,6 +72,9 @@ export interface PullRequest {
   state: "open" | "closed" | "merged" | "draft"
   reviewRequested: boolean
   authoredByMe: boolean
+  changesRequested: boolean
+  copilotComments: boolean
+  mergeConflicts: boolean
   remoteCreatedAt: string | null
   remoteUpdatedAt: string | null
   syncedAt: string

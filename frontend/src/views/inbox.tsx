@@ -4,7 +4,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { GitPullRequest, ExternalLink, Eye, User, Check, X } from "lucide-react"
+import { GitPullRequest, ExternalLink, Eye, User, Check, X, Link2, Search, ChevronDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -14,12 +14,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { EmptyState, LoadingRow, ErrorBanner } from "@/components/primitives"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { EmptyState, LoadingRow, ErrorBanner, PrStatusIcons } from "@/components/primitives"
 import { PR_STATE_META, LINEAR_STATE_META, relTime } from "@/lib/status"
 import {
   usePullRequests,
   useLinearIssues,
   useSyncStates,
+  useTodos,
+  useLinkPullRequest,
   useTodoFromPullRequest,
   useTodoFromLinearIssue,
   useDismissPullRequest,
@@ -42,6 +52,8 @@ export function InboxView() {
 
   // Active (not dismissed) items only.
   const activePulls = (pulls.data ?? []).filter((p) => !p.dismissedAt)
+  const openPulls = activePulls.filter((p) => p.state === "open")
+  const inactivePulls = activePulls.filter((p) => p.state !== "open")
   const activeLinears = (linears.data ?? []).filter((l) => !l.dismissedAt)
   const dismissedPulls = (pulls.data ?? []).filter((p) => p.dismissedAt)
   const dismissedLinears = (linears.data ?? []).filter((l) => l.dismissedAt)
@@ -70,9 +82,22 @@ export function InboxView() {
         syncing={syncGithubMut.isPending}
         syncState={sync.data?.find((s) => s.source === "github")}
       >
-        {activePulls.map((pr) => (
+        {openPulls.map((pr) => (
           <PrRow key={pr.id} pr={pr} />
         ))}
+        {inactivePulls.length > 0 && (
+          <details className="mt-2">
+            <summary className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+              <ChevronDown className="size-3 transition-transform [[open]>&]:rotate-90" />
+              Closed / merged / draft ({inactivePulls.length})
+            </summary>
+            <div className="mt-1 space-y-0.5">
+              {inactivePulls.map((pr) => (
+                <PrRow key={pr.id} pr={pr} />
+              ))}
+            </div>
+          </details>
+        )}
       </InboxSection>
 
       {(dismissedPulls.length > 0 || dismissedLinears.length > 0) && (
@@ -164,7 +189,12 @@ function InboxSection({
 function PrRow({ pr, dismissed }: { pr: PullRequest; dismissed?: boolean }) {
   const todoFromPr = useTodoFromPullRequest()
   const dismissPr = useDismissPullRequest()
+  const linkPr = useLinkPullRequest()
+  const todos = useTodos()
   const meta = PR_STATE_META[pr.state]
+
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [todoSearch, setTodoSearch] = useState("")
 
   const handleConvert = (planToday: boolean) => {
     todoFromPr.mutate(
@@ -183,6 +213,22 @@ function PrRow({ pr, dismissed }: { pr: PullRequest; dismissed?: boolean }) {
     })
   }
 
+  const handleLinkTodo = async (todoId: number) => {
+    try {
+      await linkPr.mutateAsync({ todoId, pullRequestId: pr.id, relation: "references" })
+      toast.success("PR linked to todo")
+      setLinkOpen(false)
+      setTodoSearch("")
+    } catch {
+      toast.error("Could not link PR")
+    }
+  }
+
+  const filteredTodos = (todos.data ?? []).filter((t) => {
+    if (!todoSearch) return true
+    return t.title.toLowerCase().includes(todoSearch.toLowerCase())
+  })
+
   return (
     <div className={cn("flex items-start gap-3 rounded-md px-3 py-2 hover:bg-secondary/30", dismissed && "opacity-50")}>
       <span className={cn("mt-0.5 font-mono text-sm", meta.color)}>{meta.glyph}</span>
@@ -191,6 +237,11 @@ function PrRow({ pr, dismissed }: { pr: PullRequest; dismissed?: boolean }) {
           <span className="truncate text-sm">{pr.title}</span>
           {pr.reviewRequested && <Badge variant="outline" className="gap-1 text-[10px]"><Eye className="size-2.5" />Review</Badge>}
           {pr.authoredByMe && <Badge variant="outline" className="gap-1 text-[10px]"><User className="size-2.5" />Author</Badge>}
+          <PrStatusIcons
+            changesRequested={pr.changesRequested}
+            copilotComments={pr.copilotComments}
+            mergeConflicts={pr.mergeConflicts}
+          />
         </div>
         <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
           <a href={pr.url} target="_blank" rel="noreferrer" className="hover:text-foreground">
@@ -205,6 +256,43 @@ function PrRow({ pr, dismissed }: { pr: PullRequest; dismissed?: boolean }) {
       </div>
       {!dismissed && (
         <div className="flex items-center gap-1">
+          <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground">
+                <Link2 className="size-3" />Link
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Link to todo</DialogTitle>
+              </DialogHeader>
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={todoSearch}
+                  onChange={(e) => setTodoSearch(e.target.value)}
+                  placeholder="Search todos…"
+                  className="pl-7 text-sm"
+                />
+              </div>
+              <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                {todos.isLoading && <LoadingRow label="Loading todos…" />}
+                {filteredTodos.length === 0 && !todos.isLoading && (
+                  <p className="py-4 text-center text-sm text-muted-foreground/40">No todos found.</p>
+                )}
+                {filteredTodos.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => handleLinkTodo(t.id)}
+                    disabled={linkPr.isPending}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary/40 disabled:opacity-50"
+                  >
+                    <span className="truncate text-sm">{t.title}</span>
+                  </button>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="text-xs">

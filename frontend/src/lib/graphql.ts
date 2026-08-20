@@ -26,7 +26,7 @@ import type {
   TodoTagFilterInput,
 } from "@/types"
 
-const ENDPOINT = "/graphql"
+const ENDPOINT = import.meta.env.VITE_GRAPHQL_ENDPOINT ?? "/graphql"
 
 export class GraphQLError extends Error {
   errors: unknown[]
@@ -96,6 +96,7 @@ const EVENT_FIELDS = `
 const PR_FIELDS = `
   id provider owner repo number title url author state
   reviewRequested authoredByMe
+  changesRequested copilotComments mergeConflicts
   remoteCreatedAt remoteUpdatedAt syncedAt dismissedAt
 `
 
