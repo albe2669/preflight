@@ -9,6 +9,7 @@ mod m20260101_000004_create_todo_day_plan;
 mod m20260101_000005_create_pull_request;
 mod m20260101_000006_create_linear_issue;
 mod m20260101_000007_create_sync_state;
+mod m20260120_000001_pr_review_fields;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260101_000005_create_pull_request::Migration),
             Box::new(m20260101_000006_create_linear_issue::Migration),
             Box::new(m20260101_000007_create_sync_state::Migration),
+            Box::new(m20260120_000001_pr_review_fields::Migration),
         ]
     }
 }

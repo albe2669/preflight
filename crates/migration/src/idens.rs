@@ -86,6 +86,9 @@ pub enum PullRequest {
     RemoteUpdatedAt,
     SyncedAt,
     DismissedAt,
+    ChangesRequested,
+    CopilotComments,
+    MergeConflicts,
 }
 
 #[derive(DeriveIden)]
