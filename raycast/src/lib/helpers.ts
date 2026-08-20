@@ -13,10 +13,12 @@ import type {
 
 const DEFAULT_DAY_START_HOUR = 4;
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
+const DEFAULT_ENDPOINT = "http://127.0.0.1:8000/";
 
 interface Prefs {
   "day-start-hour"?: string;
   timezone?: string;
+  endpoint?: string;
 }
 
 /** Read the day-start-hour preference (0-23), default 4. */
@@ -29,6 +31,12 @@ export function dayStartHour(): number {
 /** Read the server IANA timezone preference, default America/Los_Angeles. */
 export function preferredTimeZone(): string {
   return getPreferenceValues<Prefs>().timezone || DEFAULT_TIMEZONE;
+}
+
+/** Read the GraphQL endpoint preference, ensuring a trailing slash. */
+export function preferredEndpoint(): string {
+  const raw = getPreferenceValues<Prefs>().endpoint || DEFAULT_ENDPOINT;
+  return raw.endsWith("/") ? raw : `${raw}/`;
 }
 
 /**

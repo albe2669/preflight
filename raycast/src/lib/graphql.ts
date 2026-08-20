@@ -21,8 +21,8 @@ import type {
   LinkRelation,
   OrderBy,
 } from "../types";
+import { preferredEndpoint } from "./helpers";
 
-const ENDPOINT = "http://127.0.0.1:8000/";
 
 export class GraphqlError extends Error {
   constructor(message: string, readonly errors?: unknown) {
@@ -38,7 +38,7 @@ interface GraphQLResponse<T> {
 
 /** Fire one root-field operation. Returns `data[fieldName]`. */
 async function request<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  const res = await fetch(ENDPOINT, {
+  const res = await fetch(preferredEndpoint(), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ query, variables }),

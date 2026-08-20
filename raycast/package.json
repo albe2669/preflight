@@ -54,6 +54,15 @@
       "placeholder": "4"
     },
     {
+      "name": "endpoint",
+      "title": "GraphQL Endpoint",
+      "description": "URL of the preflight GraphQL server (host:port from your config). Defaults to the source-run address.",
+      "type": "textfield",
+      "default": "http://127.0.0.1:8000/",
+      "required": false,
+      "placeholder": "http://127.0.0.1:8000/"
+    },
+    {
       "name": "timezone",
       "title": "Server Timezone",
       "description": "IANA timezone the preflight server uses to compute the logical date (e.g. America/Los_Angeles).",
