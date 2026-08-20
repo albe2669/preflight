@@ -10,7 +10,7 @@ to `core` services, and return domain types.
 
 ## Exposed API
 
-- `schema_builder(db, todo, day_plan, link, review, github, linear, depth, complexity) -> SchemaBuilder`
+- `schema_builder(db, todo, day_plan, link, review, github, linear, clock, depth, complexity) -> SchemaBuilder`
   — registers entities, enums, custom queries, custom mutations, and the
   `DailyReview` output type. Each service is passed as an `Arc<dyn Trait>`.
 - `schema(...)` — convenience wrapper that finishes the builder with no limits.
@@ -19,13 +19,14 @@ to `core` services, and return domain types.
 
 - `query_root.rs` — `schema_builder`: registers all entity modules (queries
   only), the five `ActiveEnum`s, custom queries, custom mutations, and the
-  `DailyReview` output type. Sets depth/complexity limits. Stores `db` and
-  each service `Arc<dyn Trait>` as schema `Context` data.
-- `query.rs` — custom queries Seaography can't express (`dailyReview`).
+  `DailyReview` and `Clock` output types. Sets depth/complexity limits.
+  Stores `db`, each service `Arc<dyn Trait>`, and the `Clock` as schema
+  `Context` data.
+- `query.rs` — custom queries Seaography can't express (`dailyReview`, `clock`).
 - `mutation/` — hand-written resolvers (`todo`, `day_plan`, `tags`, `convert`,
   `sync`). Each pulls its `Arc<dyn Service>` from `Context`, calls the method,
   and maps `core::Error` / `sync::SyncError` to `async_graphql::Error`.
-- `types.rs` — `DailyReview` output type (mirrors `core::DailyReview`).
+- `types.rs` — `DailyReview` and `Clock` output types.
 - `entities.rs` — re-exports entity modules for the `register_entity!` calls.
 
 ## External flow

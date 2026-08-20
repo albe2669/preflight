@@ -30,13 +30,25 @@ export function readConfig(): { host?: string; port?: number } {
   } catch {
     return {};
   }
-  // Find the [server] section: from its header up to the next header or end.
-  const section = text.match(/^\s*\[server\]\s*$([\s\S]*?)(?=^\s*\[[^\]]*\]\s*$|$)/m);
-  if (!section) return {};
-  const body = section[1];
-  const host = body.match(/^\s*host\s*=\s*"([^"]*)"/m)?.[1];
-  const portStr = body.match(/^\s*port\s*=\s*(\d+)/m)?.[1];
-  const port = portStr != null ? Number(portStr) : undefined;
+  // Parse the [server] section line-by-line: from its header to the next
+  // header (or end of file). Avoids regex multiline-anchor pitfalls.
+  const lines = text.split(/\r?\n/);
+  let inServer = false;
+  let host: string | undefined;
+  let port: number | undefined;
+  for (const line of lines) {
+    const header = line.match(/^\s*\[(.*)\]\s*$/);
+    if (header) {
+      inServer = header[1] === "server";
+      continue;
+    }
+    if (inServer) {
+      const h = line.match(/^\s*host\s*=\s*"([^"]*)"/);
+      if (h) host = h[1];
+      const p = line.match(/^\s*port\s*=\s*(\d+)/);
+      if (p) port = Number(p[1]);
+    }
+  }
   return { host, port };
 }
 
