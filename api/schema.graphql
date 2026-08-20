@@ -511,6 +511,9 @@ type PullRequest {
   state: String!
   reviewRequested: Boolean!
   authoredByMe: Boolean!
+  changesRequested: Boolean!
+  copilotComments: Boolean!
+  mergeConflicts: Boolean!
   remoteCreatedAt: String
   remoteUpdatedAt: String
   syncedAt: String!
