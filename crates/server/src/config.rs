@@ -91,6 +91,8 @@ pub struct ServerConfig {
     pub depth_limit: Option<usize>,
     pub complexity_limit: Option<usize>,
     #[serde(default)]
+    pub frontend_dist: Option<String>,
+    #[serde(default)]
     pub cors_origins: Vec<String>,
 }
 
@@ -725,6 +727,56 @@ cors_origins = ["*"]
             xdg_config_path_from(None, None),
             None,
             "None when neither env is set"
+        );
+    }
+
+    #[test]
+    fn test_frontend_dist_defaults_to_none_when_unset() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = []
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        assert!(cfg.server.frontend_dist.is_none());
+    }
+
+    #[test]
+    fn test_frontend_dist_parses_when_set() {
+        let toml = r#"
+[database]
+path = "/tmp/preflight.db"
+[clock]
+timezone = "UTC"
+day_start_hour = 8
+[sync]
+github_token = "tok"
+linear_token = "tok"
+[sync.github]
+filters = []
+[sync.linear]
+filters = []
+[server]
+host = "127.0.0.1"
+port = 0
+frontend_dist = "/var/lib/preflight/frontend"
+"#;
+        let cfg = Config::from_content(toml).unwrap();
+        assert_eq!(
+            cfg.server.frontend_dist.as_deref(),
+            Some("/var/lib/preflight/frontend")
         );
     }
 }

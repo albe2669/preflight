@@ -9,6 +9,7 @@ use axum::{
     routing::get,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::services::ServeDir;
 
 async fn graphql_playground() -> impl IntoResponse {
     response::Html(playground_source(GraphQLPlaygroundConfig::new("/")))
@@ -18,12 +19,16 @@ async fn graphql_handler(State(schema): State<Schema>, req: GraphQLRequest) -> G
     schema.execute(req.into_inner()).await.into()
 }
 
-pub fn router(schema: Schema, cors_origins: &[String]) -> Router {
+pub fn router(schema: Schema, cors_origins: &[String], frontend_dist: Option<&str>) -> Router {
     let cors = build_cors(cors_origins);
-    Router::new()
+    let mut router = Router::new()
         .route("/", get(graphql_playground).post(graphql_handler))
         .with_state(schema)
-        .layer(cors)
+        .layer(cors);
+    if let Some(path) = frontend_dist {
+        router = router.fallback_service(ServeDir::new(path));
+    }
+    router
 }
 
 /// Build a CORS layer from the configured origins. An empty list permits no

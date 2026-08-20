@@ -361,7 +361,7 @@ async fn main() -> anyhow::Result<()> {
 
     let schema = graphql::schema_builder(db, todo_svc, day_plan_svc, link_svc,
         review_svc, github_sync, linear_sync, clock, depth, complexity).finish()?;
-    let app = routes::router(schema, &cfg.server.allowed_origins());
+    let app = routes::router(schema, &cfg.server.allowed_origins(), cfg.server.frontend_dist.as_deref());
     axum::serve(listener, app).await?;
     Ok(())
 }
