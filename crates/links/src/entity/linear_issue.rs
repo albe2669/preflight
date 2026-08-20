@@ -3,16 +3,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    DeriveEntityModel,
-    Serialize,
-    Deserialize,
-    async_graphql :: SimpleObject,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "linear_issue")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -40,9 +31,32 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(has_one = "super::todo_linear_issue::Entity")]
+    TodoLinearIssue,
+}
+
+impl Related<super::todo_linear_issue::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::TodoLinearIssue.def()
+    }
+}
+
+impl Related<super::todo::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::todo_linear_issue::Relation::Todo.def()
+    }
+    fn via() -> Option<RelationDef> {
+        Some(super::todo_linear_issue::Relation::LinearIssue.def().rev())
+    }
+}
 
 impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelatedEntity)]
-pub enum RelatedEntity {}
+pub enum RelatedEntity {
+    #[sea_orm(entity = "super::todo_linear_issue::Entity")]
+    TodoLinearIssue,
+    #[sea_orm(entity = "super::todo::Entity")]
+    Todo,
+}
