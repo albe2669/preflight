@@ -128,12 +128,34 @@ impl Default for LoggingConfig {
 }
 
 impl Config {
-    /// Load config from `config/default.toml`, or a path named by the CONFIG env var.
+    /// Load config. Resolution order:
+    ///   1. the `CONFIG` env var (explicit path),
+    ///   2. `~/.config/preflight/config.toml` (the shared file the Nix module
+    ///      writes, so server, TUI, Raycast, and the web frontend read one
+    ///      source of truth),
+    ///   3. `config/default.toml` (source runs without an installed config).
     pub fn load() -> anyhow::Result<Config> {
-        let path = std::env::var("CONFIG").unwrap_or_else(|_| "config/default.toml".to_string());
+        let path = std::env::var("CONFIG").unwrap_or_else(|_| {
+            let xdg = Self::xdg_config_path().unwrap_or_else(|| "config/default.toml".to_string());
+            if std::path::Path::new(&xdg).exists() {
+                xdg
+            } else {
+                "config/default.toml".to_string()
+            }
+        });
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("failed to read config {path}: {e}"))?;
         Self::from_content(&content)
+    }
+
+    /// `$XDG_CONFIG_HOME/preflight/config.toml`, falling back to
+    /// `$HOME/.config/preflight/config.toml` per the XDG Base Directory spec.
+    /// Returns `None` if neither `XDG_CONFIG_HOME` nor `HOME` is set.
+    fn xdg_config_path() -> Option<String> {
+        xdg_config_path_from(
+            std::env::var("XDG_CONFIG_HOME").ok(),
+            std::env::var("HOME").ok(),
+        )
     }
 
     /// Parse a TOML string into a `Config` and validate it.
@@ -171,6 +193,16 @@ impl Config {
             .map_err(|e| anyhow::anyhow!("invalid timezone {}: {e}", self.clock.timezone))?;
         Ok(todo_domain::Clock::new(tz, self.clock.day_start_hour))
     }
+}
+
+/// Pure resolution of the XDG config path from explicit env values.
+/// `$XDG_CONFIG_HOME` wins when non-empty; otherwise `$HOME/.config`.
+fn xdg_config_path_from(xdg_config_home: Option<String>, home: Option<String>) -> Option<String> {
+    if let Some(xdg) = xdg_config_home.filter(|s| !s.is_empty()) {
+        return Some(format!("{xdg}/preflight/config.toml"));
+    }
+    let home = home?;
+    Some(format!("{home}/.config/preflight/config.toml"))
 }
 
 impl GithubSyncConfig {
@@ -658,5 +690,41 @@ cors_origins = ["*"]
 "#;
         let cfg = Config::from_content(toml).unwrap();
         assert_eq!(cfg.server.allowed_origins(), vec!["*".to_string()]);
+    }
+
+    #[test]
+    fn test_xdg_config_path_uses_home_when_xdg_unset() {
+        assert_eq!(
+            xdg_config_path_from(None, Some("/home/u".to_string())),
+            Some("/home/u/.config/preflight/config.toml".to_string()),
+            "falls back to $HOME/.config when XDG_CONFIG_HOME is unset"
+        );
+    }
+
+    #[test]
+    fn test_xdg_config_path_prefers_xdg_config_home() {
+        assert_eq!(
+            xdg_config_path_from(Some("/custom/xdg".to_string()), Some("/home/u".to_string())),
+            Some("/custom/xdg/preflight/config.toml".to_string()),
+            "XDG_CONFIG_HOME wins when set"
+        );
+    }
+
+    #[test]
+    fn test_xdg_config_path_empty_xdg_falls_back_to_home() {
+        assert_eq!(
+            xdg_config_path_from(Some(String::new()), Some("/home/u".to_string())),
+            Some("/home/u/.config/preflight/config.toml".to_string()),
+            "an empty XDG_CONFIG_HOME falls back to $HOME/.config"
+        );
+    }
+
+    #[test]
+    fn test_xdg_config_path_none_when_no_home() {
+        assert_eq!(
+            xdg_config_path_from(None, None),
+            None,
+            "None when neither env is set"
+        );
     }
 }

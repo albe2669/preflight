@@ -109,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
         review_svc,
         github_sync,
         linear_sync,
+        clock.clone(),
         cfg.server.depth_limit,
         cfg.server.complexity_limit,
     )

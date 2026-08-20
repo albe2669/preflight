@@ -21,4 +21,15 @@ impl Queries {
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(review.into())
     }
+
+    pub async fn clock(
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<crate::types::Clock> {
+        let clock = ctx.data::<todo_domain::Clock>().unwrap().clone();
+        Ok(crate::types::Clock {
+            logicalDate: clock.now_logical(),
+            timezone: clock.tz.to_string(),
+            dayStartHour: clock.day_start_hour,
+        })
+    }
 }

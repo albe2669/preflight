@@ -35,3 +35,16 @@ impl From<todo_domain::DailyReview> for DailyReview {
         }
     }
 }
+
+/// GraphQL representation of the server clock.
+///
+/// The server is the single source of truth for the logical date. Clients
+/// fetch this once at startup instead of re-deriving the date locally, so
+/// timezone and day-start-hour never drift across the TUI, Raycast, and web
+/// frontend.
+#[derive(Clone, CustomOutputType)]
+pub struct Clock {
+    pub logicalDate: chrono::NaiveDate,
+    pub timezone: String,
+    pub dayStartHour: i64,
+}

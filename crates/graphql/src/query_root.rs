@@ -22,6 +22,7 @@ pub fn schema_builder(
     review: Arc<dyn todo_domain::ReviewService>,
     github: Arc<dyn github::GithubSync>,
     linear: Arc<dyn linear::LinearSync>,
+    clock: todo_domain::Clock,
     depth: Option<usize>,
     complexity: Option<usize>,
 ) -> SchemaBuilder {
@@ -56,7 +57,7 @@ pub fn schema_builder(
     builder.register_custom_mutation::<crate::mutation::ConvertMutations>();
     builder.register_custom_mutation::<crate::mutation::SyncMutations>();
 
-    // Register custom output types.
+    builder.register_custom_output::<crate::types::Clock>();
     builder.register_custom_output::<crate::types::DailyReview>();
 
     builder
@@ -69,5 +70,6 @@ pub fn schema_builder(
         .data(link)
         .data(review)
         .data(github)
+        .data(clock.clone())
         .data(linear)
 }

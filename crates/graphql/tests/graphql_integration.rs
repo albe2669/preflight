@@ -71,9 +71,20 @@ async fn build_schema(
     github: Arc<dyn github::GithubSync>,
     linear: Arc<dyn linear::LinearSync>,
 ) -> async_graphql::dynamic::Schema {
-    graphql::schema_builder(db, todo, day_plan, link, review, github, linear, None, None)
-        .finish()
-        .expect("schema build failed")
+    graphql::schema_builder(
+        db,
+        todo,
+        day_plan,
+        link,
+        review,
+        github,
+        linear,
+        todo_domain::Clock::new(chrono_tz::America::Los_Angeles, 4),
+        None,
+        None,
+    )
+    .finish()
+    .expect("schema build failed")
 }
 
 /// Execute a GraphQL query / mutation and return the response.
@@ -611,6 +622,46 @@ async fn test_daily_review_empty_arrays_for_unplanned_fields() {
             .map_or(true, |a| a.is_empty()),
         "touched should be empty"
     );
+}
+
+#[tokio::test]
+async fn test_clock_returns_configured_timezone_and_day_start() {
+    let db = setup_db().await;
+    let (todo, day_plan, link, review, github, linear) = stub_services();
+    let schema = build_schema(db, todo, day_plan, link, review, github, linear).await;
+
+    let resp = execute(
+        &schema,
+        r#"{ clock { logicalDate timezone dayStartHour } }"#,
+    )
+    .await;
+
+    assert!(resp.errors.is_empty(), "errors: {:#?}", resp.errors);
+    let data = response_json(&resp);
+    // The test schema uses America/Los_Angeles, day_start_hour 4 (build_schema).
+    assert_eq!(
+        data["clock"]["timezone"],
+        serde_json::json!("America/Los_Angeles")
+    );
+    assert_eq!(data["clock"]["dayStartHour"], serde_json::json!(4));
+    // logicalDate is a string of the form YYYY-MM-DD.
+    let date = data["clock"]["logicalDate"]
+        .as_str()
+        .expect("logicalDate is a string");
+    assert!(
+        regex_like_is_date(date),
+        "logicalDate should be YYYY-MM-DD, got {date}"
+    );
+}
+
+/// Trivial YYYY-MM-DD shape check (no regex crate in dev-deps).
+fn regex_like_is_date(s: &str) -> bool {
+    s.len() == 10
+        && s.as_bytes()[4] == b'-'
+        && s.as_bytes()[7] == b'-'
+        && s[..4].chars().all(|c| c.is_ascii_digit())
+        && s[5..7].chars().all(|c| c.is_ascii_digit())
+        && s[8..10].chars().all(|c| c.is_ascii_digit())
 }
 
 #[tokio::test]

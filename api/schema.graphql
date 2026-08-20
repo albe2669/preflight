@@ -421,6 +421,12 @@ type DailyReview {
   carriedOver: [Todo!]!
 }
 
+type Clock {
+  logicalDate: String!
+  timezone: String!
+  dayStartHour: Int!
+}
+
 type Enumeration {
   name: String!
   variants: [String!]!
@@ -535,6 +541,7 @@ type Query {
   todoLinearIssue(filters: TodoLinearIssueFilterInput, having: TodoLinearIssueHavingInput, orderBy: TodoLinearIssueOrderInput, pagination: PaginationInput): TodoLinearIssueConnection!
   syncState(filters: SyncStateFilterInput, having: SyncStateHavingInput, orderBy: SyncStateOrderInput, pagination: PaginationInput): SyncStateConnection!
   dailyReview(date: String!): DailyReview!
+  clock: Clock!
   _sea_orm_entity_metadata(table_name: String!): Table!
 }
 
