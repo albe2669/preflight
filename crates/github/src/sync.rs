@@ -170,6 +170,9 @@ pub struct PrRecord {
     pub authored_by_me: bool,
     pub remote_created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub remote_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub changes_requested: bool,
+    pub copilot_comments: bool,
+    pub merge_conflicts: bool,
 }
 
 /// Idempotently upsert a GitHub pull request row.
@@ -197,6 +200,9 @@ pub async fn upsert_pr(db: &DatabaseConnection, rec: &PrRecord) -> Result<pull_r
             am.state = Set(rec.state.clone());
             am.review_requested = Set(rec.review_requested);
             am.authored_by_me = Set(rec.authored_by_me);
+            am.changes_requested = Set(rec.changes_requested);
+            am.copilot_comments = Set(rec.copilot_comments);
+            am.merge_conflicts = Set(rec.merge_conflicts);
             am.remote_updated_at = Set(rec.remote_updated_at.map(|dt| dt.into()));
             am.synced_at = Set(synced);
             Ok(am.update(db).await?)
@@ -214,6 +220,9 @@ pub async fn upsert_pr(db: &DatabaseConnection, rec: &PrRecord) -> Result<pull_r
                 state: Set(rec.state.clone()),
                 review_requested: Set(rec.review_requested),
                 authored_by_me: Set(rec.authored_by_me),
+                changes_requested: Set(rec.changes_requested),
+                copilot_comments: Set(rec.copilot_comments),
+                merge_conflicts: Set(rec.merge_conflicts),
                 remote_created_at: Set(rec.remote_created_at.map(|dt| dt.into())),
                 remote_updated_at: Set(rec.remote_updated_at.map(|dt| dt.into())),
                 synced_at: Set(synced),
@@ -290,6 +299,9 @@ mod tests {
             authored_by_me,
             remote_created_at: None,
             remote_updated_at: None,
+            changes_requested: false,
+            copilot_comments: false,
+            merge_conflicts: false,
         }
     }
 
@@ -579,5 +591,45 @@ mod tests {
             log_text.contains("sync loop end"),
             "expected sync loop end event, got: {log_text}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_upsert_pr_updates_state_on_existing_pr_transition() {
+        let db = setup_db().await;
+
+        let rec = PrRecord {
+            provider: "github".into(),
+            owner: "org".into(),
+            repo: "repo".into(),
+            number: 1,
+            title: "PR #1".into(),
+            url: "https://github.com/org/repo/pull/1".into(),
+            author: Some("alice".into()),
+            state: PullRequestState::Open,
+            review_requested: false,
+            authored_by_me: false,
+            remote_created_at: None,
+            remote_updated_at: None,
+            changes_requested: false,
+            copilot_comments: false,
+            merge_conflicts: false,
+        };
+        upsert_pr(&db, &rec).await.unwrap();
+
+        let updated = PrRecord {
+            state: PullRequestState::Merged,
+            changes_requested: true,
+            merge_conflicts: true,
+            ..rec
+        };
+        let model = upsert_pr(&db, &updated).await.unwrap();
+
+        assert_eq!(model.state, PullRequestState::Merged);
+        assert!(model.changes_requested);
+        assert!(model.merge_conflicts);
+        assert!(!model.copilot_comments);
+
+        let count = pull_request::Entity::find().count(&db).await.unwrap();
+        assert_eq!(count, 1);
     }
 }

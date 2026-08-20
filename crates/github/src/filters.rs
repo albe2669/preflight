@@ -32,6 +32,9 @@ pub struct FetchedPr {
     pub authored_by_me: bool,
     pub remote_created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub remote_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub changes_requested: bool,
+    pub copilot_comments: bool,
+    pub merge_conflicts: bool,
 }
 
 impl GithubFilter {
@@ -73,7 +76,7 @@ pub fn compile_github_query(filters: &[GithubFilter]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" OR ");
-    format!("is:pr AND is:open AND ({or_part})")
+    format!("is:pr AND ({or_part})")
 }
 
 fn filter_to_clause(f: &GithubFilter) -> String {
@@ -217,6 +220,9 @@ mod tests {
             authored_by_me,
             remote_created_at: None,
             remote_updated_at: None,
+            changes_requested: false,
+            copilot_comments: false,
+            merge_conflicts: false,
         }
     }
 
@@ -302,6 +308,26 @@ mod tests {
         assert_eq!(got, "");
     }
 
+    #[test]
+    fn test_compile_github_query_multi_filter_omits_is_open() {
+        let filters = vec![
+            GithubFilter {
+                repo: Some("a".into()),
+                ..Default::default()
+            },
+            GithubFilter {
+                repo: Some("b".into()),
+                ..Default::default()
+            },
+        ];
+        let got = compile_github_query(&filters);
+        assert!(
+            !got.contains("is:open"),
+            "multi-filter query must not include is:open, got: {got}"
+        );
+        assert_eq!(&got, "is:pr AND (repo:a OR repo:b)");
+    }
+
     // -----------------------------------------------------------------------
     // post-fetch filter tests
     // -----------------------------------------------------------------------
@@ -323,6 +349,9 @@ mod tests {
                 authored_by_me: false,
                 remote_created_at: None,
                 remote_updated_at: None,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
             },
             FetchedPr {
                 repo_owner: "org".into(),
@@ -338,6 +367,9 @@ mod tests {
                 authored_by_me: false,
                 remote_created_at: None,
                 remote_updated_at: None,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
             },
         ];
         let got = apply_team_exclusion(prs, &["ai-agents".into()]);
@@ -361,6 +393,9 @@ mod tests {
             authored_by_me: false,
             remote_created_at: None,
             remote_updated_at: None,
+            changes_requested: false,
+            copilot_comments: false,
+            merge_conflicts: false,
         }];
         let got = apply_team_exclusion(prs, &["ai-agents".into()]);
         assert_eq!(got.len(), 1);

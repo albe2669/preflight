@@ -36,6 +36,9 @@ fn make_pr(provider: &str, owner: &str, repo: &str, number: i64, title: &str) ->
         authored_by_me: false,
         remote_created_at: None,
         remote_updated_at: None,
+        changes_requested: false,
+        copilot_comments: false,
+        merge_conflicts: false,
     }
 }
 

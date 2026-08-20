@@ -102,6 +102,18 @@ pub(crate) fn parse_github_page(json: Value) -> Result<GithubPage> {
             }
         }
 
+        let is_draft = node
+            .get("isDraft")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // A draft PR is OPEN on GitHub but tracked as a distinct state here.
+        let state = if is_draft {
+            "draft".to_string()
+        } else {
+            state_str.to_string()
+        };
+
         let name_with_owner = node
             .get("repository")
             .and_then(|r| r.get("nameWithOwner"))
@@ -143,6 +155,22 @@ pub(crate) fn parse_github_page(json: Value) -> Result<GithubPage> {
                     .ok()
             });
 
+        let changes_requested = node
+            .get("reviewDecision")
+            .and_then(|v| v.as_str())
+            .map(|s| s == "CHANGES_REQUESTED")
+            .unwrap_or(false);
+
+        let merge_conflicts = node
+            .get("mergeable")
+            .and_then(|v| v.as_str())
+            .map(|s| s == "CONFLICTING")
+            .unwrap_or(false);
+
+        // ponytail: Copilot comment detection needs a review-author query we
+        // do not run yet; always false until that is added.
+        let copilot_comments = false;
+
         prs.push(FetchedPr {
             repo_owner,
             repo_name,
@@ -150,13 +178,16 @@ pub(crate) fn parse_github_page(json: Value) -> Result<GithubPage> {
             title,
             url,
             author_login,
-            state: state_str.to_string(),
-            is_draft: false,
+            state,
+            is_draft,
             review_requested: false,
             requested_reviewer_teams: Vec::new(),
             authored_by_me: false,
             remote_created_at,
             remote_updated_at,
+            changes_requested,
+            copilot_comments,
+            merge_conflicts,
         });
     }
 
@@ -177,17 +208,23 @@ pub(crate) fn fetched_to_record(f: &FetchedPr) -> crate::sync::PrRecord {
         title: f.title.clone(),
         url: f.url.clone(),
         author: f.author_login.clone(),
-        state: match f.state.to_lowercase().as_str() {
-            "open" => PullRequestState::Open,
-            "closed" => PullRequestState::Closed,
-            "merged" => PullRequestState::Merged,
-            "draft" => PullRequestState::Draft,
-            _ => PullRequestState::Open,
+        state: if f.is_draft {
+            PullRequestState::Draft
+        } else {
+            match f.state.to_lowercase().as_str() {
+                "open" => PullRequestState::Open,
+                "closed" => PullRequestState::Closed,
+                "merged" => PullRequestState::Merged,
+                _ => PullRequestState::Open,
+            }
         },
         review_requested: f.review_requested,
         authored_by_me: f.authored_by_me,
         remote_created_at: f.remote_created_at,
         remote_updated_at: f.remote_updated_at,
+        changes_requested: f.changes_requested,
+        copilot_comments: f.copilot_comments,
+        merge_conflicts: f.merge_conflicts,
     }
 }
 
@@ -218,6 +255,9 @@ impl GithubApiClient for GithubApiClientImpl {
                             title
                             url
                             state
+                            isDraft
+                            reviewDecision
+                            mergeable
                             author { login }
                             createdAt
                             updatedAt
@@ -569,6 +609,115 @@ pub(crate) mod tests {
         assert!(matches!(err, GithubError::SchemaMismatch(_)));
     }
 
+    fn pr_node(
+        state: &str,
+        is_draft: bool,
+        review_decision: Option<&str>,
+        mergeable: Option<&str>,
+    ) -> Value {
+        serde_json::json!({
+            "number": 1,
+            "title": "t",
+            "url": "https://x",
+            "state": state,
+            "isDraft": is_draft,
+            "reviewDecision": review_decision,
+            "mergeable": mergeable,
+            "author": null,
+            "createdAt": "2024-01-01T00:00:00Z",
+            "updatedAt": "2024-01-01T00:00:00Z",
+            "repository": { "nameWithOwner": "a/b" }
+        })
+    }
+
+    #[test]
+    fn test_parse_github_page_changes_requested_true() {
+        let json = serde_json::json!({
+            "data": { "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, Some("CHANGES_REQUESTED"), Some("MERGEABLE"))]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].changes_requested);
+    }
+
+    #[test]
+    fn test_parse_github_page_changes_requested_false_when_approved() {
+        let json = serde_json::json!({
+            "data": { "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, Some("APPROVED"), Some("MERGEABLE"))]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(!page.prs[0].changes_requested);
+    }
+
+    #[test]
+    fn test_parse_github_page_merge_conflicts_true() {
+        let json = serde_json::json!({
+            "data": { "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, None, Some("CONFLICTING"))]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].merge_conflicts);
+    }
+
+    #[test]
+    fn test_parse_github_page_merge_conflicts_false_when_mergeable() {
+        let json = serde_json::json!({
+            "data": { "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, None, Some("MERGEABLE"))]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(!page.prs[0].merge_conflicts);
+    }
+
+    #[test]
+    fn test_parse_github_page_draft_state_overrides_open() {
+        let json = serde_json::json!({
+            "data": { "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", true, None, None)]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert_eq!(page.prs[0].state, "draft");
+        assert!(page.prs[0].is_draft);
+        let rec = fetched_to_record(&page.prs[0]);
+        assert_eq!(rec.state, PullRequestState::Draft);
+    }
+
+    #[test]
+    fn test_parse_github_page_copilot_comments_always_false() {
+        let json = serde_json::json!({
+            "data": { "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, None, None)]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(!page.prs[0].copilot_comments);
+    }
+
+    #[test]
+    fn test_parse_github_page_null_review_decision_and_mergeable() {
+        let json = serde_json::json!({
+            "data": { "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, None, None)]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(!page.prs[0].changes_requested);
+        assert!(!page.prs[0].merge_conflicts);
+    }
+
     #[test]
     fn test_fetched_to_record_maps_correctly() {
         let fetched = FetchedPr {
@@ -585,6 +734,9 @@ pub(crate) mod tests {
             authored_by_me: true,
             remote_created_at: None,
             remote_updated_at: None,
+            changes_requested: true,
+            copilot_comments: false,
+            merge_conflicts: true,
         };
         let rec = fetched_to_record(&fetched);
         assert_eq!(rec.provider, "github");
@@ -595,6 +747,10 @@ pub(crate) mod tests {
         assert_eq!(rec.author, Some("bob".into()));
         assert!(rec.authored_by_me);
         assert!(rec.review_requested);
+        assert_eq!(rec.state, PullRequestState::Draft);
+        assert!(rec.changes_requested);
+        assert!(!rec.copilot_comments);
+        assert!(rec.merge_conflicts);
     }
 
     // parse_github_page only panics if it has an unreachable code path; all
