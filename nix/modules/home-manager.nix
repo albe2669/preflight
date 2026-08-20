@@ -48,16 +48,15 @@ let
     exec "${cfg.package}/bin/pftui" "$@"
   '';
 
-  configToml =
-    if renderedConfig == null then
-      cfg.configFile
-    else
-      pkgs.writeText "preflight-config.toml" (toml.renderToml renderedConfig);
+  # XDG path the server, TUI, and services all read. `xdg.configFile` writes
+  # the rendered (or `configFile`-sourced) content here; launchers and
+  # services point `CONFIG` at it so the user can edit one file.
+  configPath = "${config.xdg.configHome}/preflight/config.toml";
 
-  # Launcher that hands the rendered (or `configFile`) config to the binary
-  # via the `CONFIG` env var the server reads at startup (`Config::load`).
+  # Launcher that points the server at the XDG config file via the `CONFIG`
+  # env var (`Config::load`), so all surfaces read the same editable file.
   launcher = pkgs.writeShellScriptBin "preflight" ''
-    export CONFIG="${configToml}"
+    export CONFIG="''${XDG_CONFIG_HOME:-$HOME/.config}/preflight/config.toml"
     exec "${cfg.package}/bin/preflight" "$@"
   '';
 in
@@ -292,6 +291,16 @@ in
       tuiLauncher
     ];
 
+    # Write the rendered config to the XDG path all surfaces read. When
+    # `configFile` is set, copy its content verbatim; otherwise render from
+    # `settings`. Either way the file lives outside the store, editable by
+    # the user, and the launchers/services above point `CONFIG` at it.
+    xdg.configFile."preflight/config.toml" =
+      if renderedConfig == null then
+        { source = cfg.configFile; }
+      else
+        { text = toml.renderToml renderedConfig; };
+
     systemd.user.services.preflight = lib.mkIf (cfg.installService && pkgs.stdenv.isLinux) {
       Unit = {
         Description = "Preflight todo server";
@@ -300,7 +309,7 @@ in
 
       Service = {
         Type = "simple";
-        Environment = [ "CONFIG=${configToml}" ];
+        Environment = [ "CONFIG=${configPath}" ];
         ExecStart = "${cfg.package}/bin/preflight";
         Restart = "on-failure";
         RestartSec = 1;
@@ -314,7 +323,7 @@ in
       config = {
         ProgramArguments = [ "${cfg.package}/bin/preflight" ];
         EnvironmentVariables = {
-          CONFIG = "${configToml}";
+          CONFIG = "${configPath}";
         };
         KeepAlive = {
           Crashed = true;

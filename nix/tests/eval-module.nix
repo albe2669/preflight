@@ -27,6 +27,16 @@ let
         default = [ ];
       };
     };
+    options.xdg = {
+      configHome = lib.mkOption {
+        type = lib.types.str;
+        default = "/home/u/.config";
+      };
+      configFile = lib.mkOption {
+        type = lib.types.attrsOf lib.types.unspecified;
+        default = { };
+      };
+    };
     options.systemd.user.services = lib.mkOption {
       type = lib.types.attrsOf lib.types.unspecified;
       default = { };
