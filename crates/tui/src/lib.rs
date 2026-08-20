@@ -32,13 +32,26 @@ use app::{App, Mode, ToastKind, View};
 pub async fn run(endpoint: &str) -> anyhow::Result<()> {
     let client = gql::Client::new(endpoint);
 
-    // Initial fetch.
-    let date_str = chrono::Local::now()
-        .date_naive()
-        .format("%Y-%m-%d")
-        .to_string();
-    let fetched = client.fetch_all(&date_str).await;
+    // Fetch the server clock so the logical date and day-start hour match
+    // the server's day boundary. Falls back to local defaults on failure.
     let mut app = App::default();
+    let date_str = match client.clock().await {
+        Ok(clock) => {
+            app.day_start_hour = clock.day_start_hour;
+            if let Ok(d) = clock.logical_date.parse::<chrono::NaiveDate>() {
+                app.logical_date = d;
+                app.review_date = d - chrono::Duration::days(1);
+            }
+            clock.logical_date
+        }
+        Err(_) => chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string(),
+    };
+
+    // Initial data fetch for the logical date.
+    let fetched = client.fetch_all(&date_str).await;
     match fetched {
         Ok(d) => {
             app.data = crate::app::AppData::from_fetch_all(d);

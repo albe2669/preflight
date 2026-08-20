@@ -222,6 +222,14 @@ pub struct DailyReview {
     pub carried_over: Vec<Todo>,
 }
 
+/// Server logical clock: the day boundary used to compute "today".
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Clock")]
+pub struct Clock {
+    pub logical_date: String,
+    pub timezone: String,
+    pub day_start_hour: i32,
+}
 // ---- Query root fragments ----
 
 // ---- Query root fragments (one root field each — the server doesn't
@@ -266,6 +274,12 @@ pub struct LinearsQuery {
 pub struct SyncQuery {
     #[cynic(rename = "syncState")]
     pub sync_state: SyncStateConnection,
+}
+
+#[derive(cynic::QueryFragment, Clone, Debug)]
+#[cynic(graphql_type = "Query")]
+pub struct ClockQuery {
+    pub clock: Clock,
 }
 
 /// Flattened data from all queries. `fetch_all` fires them concurrently and
@@ -747,6 +761,15 @@ impl Client {
         self.post_operation::<DailyReviewQuery, _>(operation)
             .await
             .map(|q| q.daily_review)
+    }
+
+    /// Fetch the server logical clock: the logical date, timezone, and the
+    /// hour a logical day starts.
+    pub async fn clock(&self) -> GqlResult<Clock> {
+        let operation = cynic::QueryBuilder::build(());
+        self.post_operation::<ClockQuery, _>(operation)
+            .await
+            .map(|q| q.clock)
     }
 
     pub async fn todo_events(&self, todo_id: i32) -> GqlResult<Vec<TodoEvent>> {
