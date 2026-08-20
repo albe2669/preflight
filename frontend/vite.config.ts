@@ -18,7 +18,7 @@ export default defineConfig({
       // directly, but the proxy avoids origin issues and covers a CORS
       // config change.
       '/graphql': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:3030',
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/graphql/, '/'),
       },
