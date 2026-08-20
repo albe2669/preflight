@@ -43,35 +43,7 @@
       "interval": "5m"
     }
   ],
-  "preferences": [
-    {
-      "name": "day-start-hour",
-      "title": "Day Start Hour",
-      "description": "Logical day starts at this local hour (0-23). Late-night work counts as the prior day.",
-      "type": "textfield",
-      "default": "4",
-      "required": false,
-      "placeholder": "4"
-    },
-    {
-      "name": "endpoint",
-      "title": "GraphQL Endpoint",
-      "description": "URL of the preflight GraphQL server (host:port from your config). Defaults to the source-run address.",
-      "type": "textfield",
-      "default": "http://127.0.0.1:8000/",
-      "required": false,
-      "placeholder": "http://127.0.0.1:8000/"
-    },
-    {
-      "name": "timezone",
-      "title": "Server Timezone",
-      "description": "IANA timezone the preflight server uses to compute the logical date (e.g. America/Los_Angeles).",
-      "type": "textfield",
-      "default": "America/Los_Angeles",
-      "required": false,
-      "placeholder": "America/Los_Angeles"
-    }
-  ],
+  "preferences": [],
   "dependencies": {
     "@raycast/api": "^1.95.0",
     "@raycast/utils": "^1.5.0",

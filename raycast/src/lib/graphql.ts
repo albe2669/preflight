@@ -6,6 +6,7 @@
  * single-field document; `request()` returns that one field's data.
  */
 import type {
+  Clock,
   Connection,
   DailyReview,
   LinearIssue,
@@ -169,6 +170,12 @@ export async function fetchSyncStates(): Promise<SyncState[]> {
     `{ syncState { nodes { source cursor lastSyncedAt lastStatus lastError } } }`,
   );
   return data.syncState.nodes;
+}
+
+/** Fetch the server clock: authoritative logicalDate, timezone, dayStartHour. */
+export async function fetchClock(): Promise<Clock> {
+  const data = await request<{ clock: Clock }>(`{ clock { logicalDate timezone dayStartHour } }`);
+  return data.clock;
 }
 
 export async function fetchDailyReview(date: string): Promise<DailyReview> {

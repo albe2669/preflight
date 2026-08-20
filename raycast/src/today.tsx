@@ -14,10 +14,11 @@ import {
   confirmAlert,
   showToast,
 } from "@raycast/api";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   addTag,
   createTodo,
+  fetchClock,
   fetchTodayPlan,
   GraphqlError,
   planForToday,
@@ -25,14 +26,18 @@ import {
   setTodoStatus,
   unplanForToday,
 } from "./lib/graphql";
-import { prBadge, statusVisual, todayLogical } from "./lib/helpers";
+import { prBadge, statusVisual } from "./lib/helpers";
 import { SetStatusAction } from "./lib/actions";
 import { useFetch } from "./hooks/useFetch";
 import type { TodoStatus } from "./types";
 
 export default function TodayCommand() {
-  const date = useMemo(() => todayLogical(), []);
-  const { data, loading, error, unreachable, reload } = useFetch(() => fetchTodayPlan(date), []);
+  const { data: clock, loading: clockLoading } = useFetch(() => fetchClock(), []);
+  const date = clock?.logicalDate ?? "";
+  const { data, loading, error, unreachable, reload } = useFetch(
+    () => (date ? fetchTodayPlan(date) : Promise.resolve([])),
+    [date],
+  );
   const [showCreate, setShowCreate] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
 
@@ -128,7 +133,7 @@ export default function TodayCommand() {
     }
   }
 
-  if (loading) {
+  if (clockLoading || loading) {
     return (
       <List isLoading>
         <List.Item title={`Loading today's plan · ${date}…`} icon={Icon.ArrowClockwise} />

@@ -2,6 +2,7 @@
 // The server does NOT support multiple root fields in one operation, so each
 // request fires exactly one root field.
 import type {
+  Clock,
   Connection,
   DailyReview,
   LinearIssue,
@@ -160,6 +161,12 @@ export async function querySyncStates(): Promise<SyncState[]> {
     `query Sync { syncState { nodes { ${SYNC_FIELDS} } } }`,
   )
   return data.syncState.nodes
+}
+
+/** Fetch the server clock: authoritative logicalDate, timezone, dayStartHour. */
+export async function queryClock(): Promise<Clock> {
+  const data = await request<{ clock: Clock }>(`query Clock { clock { logicalDate timezone dayStartHour } }`)
+  return data.clock
 }
 
 export async function queryDailyReview(date: string): Promise<DailyReview> {

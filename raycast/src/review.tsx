@@ -4,8 +4,8 @@
  */
 import { Action, ActionPanel, Color, Icon, List } from "@raycast/api";
 import { useState } from "react";
-import { fetchDailyReview } from "./lib/graphql";
-import { statusVisual, todayLogical } from "./lib/helpers";
+import { fetchClock, fetchDailyReview } from "./lib/graphql";
+import { statusVisual } from "./lib/helpers";
 import { useFetch } from "./hooks/useFetch";
 import type { Todo } from "./types";
 
@@ -16,8 +16,14 @@ function shiftDays(date: string, days: number): string {
 }
 
 export default function ReviewCommand() {
-  const [date, setDate] = useState<string>(() => todayLogical());
-  const { data, loading, error, unreachable, reload } = useFetch(() => fetchDailyReview(date), [date]);
+  const { data: clock } = useFetch(() => fetchClock(), []);
+  const today = clock?.logicalDate ?? "";
+  const [date, setDate] = useState<string>("");
+  const effectiveDate = date || today;
+  const { data, loading, error, unreachable, reload } = useFetch(
+    () => (effectiveDate ? fetchDailyReview(effectiveDate) : Promise.resolve(null)),
+    [effectiveDate],
+  );
 
   function shiftDate(days: number) {
     setDate((d) => shiftDays(d, days));
@@ -44,13 +50,13 @@ export default function ReviewCommand() {
             title="Today"
             icon={Icon.Calendar}
             shortcut={{ modifiers: ["cmd"], key: "t" }}
-            onAction={() => setDate(todayLogical())}
+            onAction={() => setDate(today)}
           />
           <Action title="Refresh" icon={Icon.ArrowClockwise} onAction={reload} />
         </ActionPanel>
       }
     >
-      <List.Section title={`Review · ${date}`}>
+      <List.Section title={`Review · ${effectiveDate}`}>
         {loading ? (
           <List.Item title="Loading review…" icon={{ source: Icon.ArrowClockwise, tintColor: Color.SecondaryText }} />
         ) : unreachable ? (

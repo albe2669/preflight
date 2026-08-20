@@ -7,12 +7,7 @@
 
 /* eslint-disable @typescript-eslint/ban-types */
 
-type ExtensionPreferences = {
-  /** Day Start Hour - Logical day starts at this local hour (0-23). Late-night work counts as the prior day. */
-  "day-start-hour": string,
-  /** Server Timezone - IANA timezone the preflight server uses to compute the logical date (e.g. America/Los_Angeles). */
-  "timezone": string
-}
+type ExtensionPreferences = {}
 
 /** Preferences accessible in all the extension's commands */
 declare type Preferences = ExtensionPreferences

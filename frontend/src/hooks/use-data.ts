@@ -27,6 +27,7 @@ import {
   mutateUnlinkPullRequest,
   mutateUnplanForToday,
   mutateUpdateTodo,
+  queryClock,
   queryDailyReview,
   queryDayPlan,
   queryLinearIssues,
@@ -47,6 +48,7 @@ export const qk = {
   pulls: ["pulls"] as const,
   linears: ["linears"] as const,
   sync: ["sync"] as const,
+  clock: ["clock"] as const,
   review: (date: string) => ["review", date] as const,
   todoEvents: (id: number) => ["todoEvents", id] as const,
   todoTags: (id: number) => ["todoTags", id] as const,
@@ -61,7 +63,11 @@ export function useTodos() {
 }
 
 export function useDayPlan(date: string) {
-  return useQuery({ queryKey: qk.dayPlan(date), queryFn: () => queryDayPlan(date) })
+  return useQuery({
+    queryKey: qk.dayPlan(date),
+    queryFn: () => queryDayPlan(date),
+    enabled: date !== "",
+  })
 }
 
 export function usePullRequests() {
@@ -76,8 +82,16 @@ export function useSyncStates() {
   return useQuery({ queryKey: qk.sync, queryFn: querySyncStates })
 }
 
+export function useClock() {
+  return useQuery({ queryKey: qk.clock, queryFn: queryClock, staleTime: 60_000 })
+}
+
 export function useDailyReview(date: string) {
-  return useQuery({ queryKey: qk.review(date), queryFn: () => queryDailyReview(date) })
+  return useQuery({
+    queryKey: qk.review(date),
+    queryFn: () => queryDailyReview(date),
+    enabled: date !== "",
+  })
 }
 
 export function useTodoEvents(todoId: number) {

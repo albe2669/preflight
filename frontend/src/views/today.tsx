@@ -10,13 +10,14 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { TodoRow } from "@/components/todo-row"
 import { EmptyState, LoadingRow, ErrorBanner } from "@/components/primitives"
-import { useDayPlan, useCreateTodo, usePlanForToday, useReorderDayPlan, useCarryOver } from "@/hooks/use-data"
-import { logicalDate, dateLabel, shiftDate } from "@/lib/date"
+import { useClock, useDayPlan, useCreateTodo, usePlanForToday, useReorderDayPlan, useCarryOver } from "@/hooks/use-data"
+import { dateLabel, shiftDate } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import type { TodoDayPlan } from "@/types"
 
 export function TodayView() {
-  const today = logicalDate()
+  const clock = useClock()
+  const today = clock.data?.logicalDate ?? ""
   const yesterday = shiftDate(today, -1)
   const plan = useDayPlan(today)
   const createTodo = useCreateTodo()
@@ -90,7 +91,9 @@ export function TodayView() {
     }
   }
 
-  const error = plan.error && !dismissedErr ? String((plan.error as Error).message) : null
+  const error = (plan.error || clock.error) && !dismissedErr
+    ? String(((plan.error || clock.error) as Error).message)
+    : null
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -98,7 +101,7 @@ export function TodayView() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold">Today</h1>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{dateLabel(today)}</p>
+          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{dateLabel(today, clock.data?.dayStartHour)}</p>
         </div>
         {rows.length > 0 && (
           <Button
@@ -116,9 +119,10 @@ export function TodayView() {
 
       {error && <ErrorBanner message={error} onDismiss={() => setDismissedErr(true)} />}
 
+      {clock.isLoading && <LoadingRow label="Loading…" />}
       {plan.isLoading && <LoadingRow label="Loading today's plan…" />}
 
-      {!plan.isLoading && !error && rows.length === 0 && (
+      {!clock.isLoading && !plan.isLoading && !error && rows.length === 0 && (
         <div className="space-y-4">
           <EmptyState
             message="Today starts empty."

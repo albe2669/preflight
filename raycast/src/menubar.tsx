@@ -9,20 +9,24 @@ import {
   MenuBarExtra,
   launchCommand,
 } from "@raycast/api";
-import { useEffect, useMemo, useState } from "react";
-import { fetchSyncStates, fetchTodayPlan, setTodoStatus, createTodo } from "./lib/graphql";
-import { statusVisual, todayLogical } from "./lib/helpers";
-import type { PlanRow, SyncState } from "./types";
+import { useEffect, useState } from "react";
+import { fetchClock, fetchSyncStates, fetchTodayPlan, setTodoStatus, createTodo } from "./lib/graphql";
+import { statusVisual } from "./lib/helpers";
+import type { Clock, PlanRow, SyncState } from "./types";
 
 interface MenuBarState {
   plan: PlanRow[];
   sync: SyncState[];
+  date: string;
 }
 
 async function load(): Promise<MenuBarState> {
-  const date = todayLogical();
-  const [plan, sync] = await Promise.all([fetchTodayPlan(date), fetchSyncStates()]);
-  return { plan, sync };
+  const clock: Clock = await fetchClock();
+  const [plan, sync] = await Promise.all([
+    fetchTodayPlan(clock.logicalDate),
+    fetchSyncStates(),
+  ]);
+  return { plan, sync, date: clock.logicalDate };
 }
 
 function syncSummary(sync: SyncState[]): { label: string; color: Color; tooltip: string }[] {
@@ -55,14 +59,14 @@ export default function MenuBarCommand() {
       .catch((e: unknown) => {
         if (cancelled) return;
         setErr(e instanceof Error ? e.message : String(e));
-        setState({ plan: [], sync: [] });
+        setState({ plan: [], sync: [], date: "" });
       });
     return () => {
       cancelled = true;
     };
   }, [reloadTick]);
 
-  const date = useMemo(() => todayLogical(), []);
+  const date = state?.date ?? "";
   const count = state?.plan.length ?? 0;
   const done = state?.plan.filter((r) => r.todo?.status === "done").length ?? 0;
   const errored = err != null;

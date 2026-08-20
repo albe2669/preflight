@@ -132,6 +132,13 @@ export interface DailyReview {
   carriedOver: Todo[];
 }
 
+/** Server clock: authoritative logical date, timezone, day-start hour. */
+export interface Clock {
+  logicalDate: string;
+  timezone: string;
+  dayStartHour: number;
+}
+
 /** A row on the Today view: plan row plus its todo and tags. */
 export interface PlanRow extends TodoDayPlan {
   todo: Todo | null;

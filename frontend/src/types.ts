@@ -128,6 +128,13 @@ export interface DailyReview {
   carriedOver: Todo[]
 }
 
+/** Server clock: authoritative logical date, timezone, day-start hour. */
+export interface Clock {
+  logicalDate: string
+  timezone: string
+  dayStartHour: number
+}
+
 // Connection wrappers.
 export interface Connection<T> {
   pageInfo: PageInfo

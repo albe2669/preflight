@@ -1,8 +1,11 @@
 /**
- * Shared helpers: logical date, status glyphs/icons/colors, link badges.
+ * Shared helpers: config-file endpoint, status glyphs/icons/colors, link badges.
  * Color is always a secondary cue; a glyph or icon carries the meaning.
  */
-import { Color, Icon, getPreferenceValues } from "@raycast/api";
+import { Color, Icon } from "@raycast/api";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import type {
   TodoStatus,
   PrState,
@@ -11,67 +14,39 @@ import type {
   LinkRelation,
 } from "../types";
 
-const DEFAULT_DAY_START_HOUR = 4;
-const DEFAULT_TIMEZONE = "America/Los_Angeles";
 const DEFAULT_ENDPOINT = "http://127.0.0.1:8000/";
 
-interface Prefs {
-  "day-start-hour"?: string;
-  timezone?: string;
-  endpoint?: string;
+/** Path to the shared preflight config file ($XDG_CONFIG_HOME or $HOME/.config). */
+function configPath(): string {
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(base, "preflight", "config.toml");
 }
 
-/** Read the day-start-hour preference (0-23), default 4. */
-export function dayStartHour(): number {
-  const raw = getPreferenceValues<Prefs>()["day-start-hour"];
-  const n = raw != null ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : DEFAULT_DAY_START_HOUR;
-}
-
-/** Read the server IANA timezone preference, default America/Los_Angeles. */
-export function preferredTimeZone(): string {
-  return getPreferenceValues<Prefs>().timezone || DEFAULT_TIMEZONE;
-}
-
-/** Read the GraphQL endpoint preference, ensuring a trailing slash. */
-export function preferredEndpoint(): string {
-  const raw = getPreferenceValues<Prefs>().endpoint || DEFAULT_ENDPOINT;
-  return raw.endsWith("/") ? raw : `${raw}/`;
-}
-
-/**
- * Logical date for an instant in a given IANA zone. The day starts at
- * `dayStartHour` wall-clock, not midnight: work at 02:00 with dayStartHour=4
- * counts as the prior day. Mirrors crates/todo/src/clock.rs.
- */
-export function logicalDate(at: Date, dayStartHour: number, timeZone: string): string {
-  // Wall-clock parts in the target zone.
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-  }).formatToParts(at);
-  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
-  let y = get("year");
-  let m = get("month");
-  let d = get("day");
-  const hour = get("hour") % 24; // hour12 "24" maps to 0
-  // Before dayStartHour, the logical day is the prior calendar day.
-  if (hour < dayStartHour) {
-    const prev = new Date(Date.UTC(y, m - 1, d) - 86400000);
-    y = prev.getUTCFullYear();
-    m = prev.getUTCMonth() + 1;
-    d = prev.getUTCDate();
+/** Read host and port from the [server] section of the shared config file. */
+export function readConfig(): { host?: string; port?: number } {
+  let text: string;
+  try {
+    text = fs.readFileSync(configPath(), "utf8");
+  } catch {
+    return {};
   }
-  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  // Find the [server] section: from its header up to the next header or end.
+  const section = text.match(/^\s*\[server\]\s*$([\s\S]*?)(?=^\s*\[[^\]]*\]\s*$|$)/m);
+  if (!section) return {};
+  const body = section[1];
+  const host = body.match(/^\s*host\s*=\s*"([^"]*)"/m)?.[1];
+  const portStr = body.match(/^\s*port\s*=\s*(\d+)/m)?.[1];
+  const port = portStr != null ? Number(portStr) : undefined;
+  return { host, port };
 }
 
-/** Logical date for now, using the day-start-hour and timezone preferences. */
-export function todayLogical(): string {
-  return logicalDate(new Date(), dayStartHour(), preferredTimeZone());
+/** Endpoint from the shared config file, falling back to the default. */
+export function preferredEndpoint(): string {
+  const { host, port } = readConfig();
+  if (host && port != null && Number.isFinite(port)) {
+    return `http://${host}:${port}/`;
+  }
+  return DEFAULT_ENDPOINT;
 }
 
 // ---- Todo status: glyph + icon + color ----

@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { TodoRow } from "@/components/todo-row"
 import { EmptyState, LoadingRow, ErrorBanner } from "@/components/primitives"
-import { useDailyReview } from "@/hooks/use-data"
-import { logicalDate, dateLabel, shiftDate } from "@/lib/date"
+import { useClock, useDailyReview } from "@/hooks/use-data"
+import { dateLabel, shiftDate } from "@/lib/date"
 import type { Todo } from "@/types"
 
 const SECTIONS: { key: "planned" | "touched" | "completed" | "carriedOver"; label: string }[] = [
@@ -20,12 +20,15 @@ const SECTIONS: { key: "planned" | "touched" | "completed" | "carriedOver"; labe
 ]
 
 export function ReviewView() {
-  const [date, setDate] = useState(logicalDate())
-  const review = useDailyReview(date)
+  const clock = useClock()
+  const today = clock.data?.logicalDate ?? ""
+  const [date, setDate] = useState("")
+  const effectiveDate = date || today
+  const review = useDailyReview(effectiveDate)
   const [dismissedErr, setDismissedErr] = useState(false)
 
   const error = review.error && !dismissedErr ? String((review.error as Error).message) : null
-  const isToday = date === logicalDate()
+  const isToday = effectiveDate === today && today !== ""
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -33,31 +36,31 @@ export function ReviewView() {
       <div className="mb-6 flex items-center gap-3">
         <div>
           <h1 className="text-lg font-semibold">Review</h1>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{dateLabel(date)}</p>
+          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{dateLabel(effectiveDate, clock.data?.dayStartHour)}</p>
         </div>
         <div className="ml-auto flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setDate(shiftDate(date, -1))}
+        onClick={() => setDate(shiftDate(effectiveDate, -1))}
           >
             <ChevronLeft className="size-4" />
           </Button>
           <Input
             type="date"
-            value={date}
+        value={effectiveDate}
             onChange={(e) => e.target.value && setDate(e.target.value)}
             className="w-36 font-mono text-xs"
           />
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setDate(shiftDate(date, 1))}
+        onClick={() => setDate(shiftDate(effectiveDate, 1))}
           >
             <ChevronRight className="size-4" />
           </Button>
           {!isToday && (
-            <Button variant="ghost" size="sm" onClick={() => setDate(logicalDate())} className="text-xs">
+            <Button variant="ghost" size="sm" onClick={() => setDate(today)} className="text-xs">
               Today
             </Button>
           )}
@@ -66,9 +69,10 @@ export function ReviewView() {
 
       {error && <ErrorBanner message={error} onDismiss={() => setDismissedErr(true)} />}
 
+      {clock.isLoading && <LoadingRow label="Loading…" />}
       {review.isLoading && <LoadingRow label="Loading review…" />}
 
-      {!review.isLoading && !error && review.data && (
+      {!clock.isLoading && !review.isLoading && !error && review.data && (
         <div className="space-y-6">
           <p className="text-xs text-muted-foreground/60">
             A review of the day — planned work, what was touched, completed, and carried over.
