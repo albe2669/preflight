@@ -210,6 +210,15 @@ fn status_hints(app: &App) -> String {
         (_, crate::app::Mode::SidebarEdit { .. }) => {
             "tab/j next field · shift-tab/k prev · enter edit · esc close · ? keys".into()
         }
+        (
+            _,
+            crate::app::Mode::SidebarAdd {
+                input_active: true, ..
+            },
+        ) => "enter create · esc cancel · # tag".into(),
+        (_, crate::app::Mode::SidebarAdd { .. }) => {
+            "tab/j next field · shift-tab/k prev · enter edit · esc cancel · ? keys".into()
+        }
         (_, crate::app::Mode::Help { .. }) => "type to filter · esc close".into(),
         (View::Today, _) => {
             "j/k move  SPC status  a add  e edit  enter detail  D done  ? keys".into()
@@ -655,6 +664,10 @@ pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
         render_sidebar_edit_form(f, app, area);
         return;
     }
+    if let crate::app::Mode::SidebarAdd { .. } = app.mode {
+        render_sidebar_add_form(f, app, area);
+        return;
+    }
 
     // Read-only info card
     let todo = sidebar_todo(app);
@@ -765,11 +778,8 @@ pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
         }
     }
 
-    // LINKS region from app.detail
-    if let crate::app::Mode::SidebarEdit { id: _, .. } = app.mode {
-        // Edit mode — handled above, but keep LINKS for read mode below
-    } else {
-        // Read mode: show LINKS if detail is loaded
+    // LINKS region from app.detail (read mode only; edit mode renders its own).
+    if !matches!(app.mode, crate::app::Mode::SidebarEdit { .. }) {
         let loaded = app.detail_loaded_id;
         let detail = app.detail.as_ref();
         if loaded.is_some() && todo.id == loaded.unwrap() {
@@ -781,18 +791,70 @@ pub fn render_info_sidebar(f: &mut Frame, app: &crate::app::App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             )));
             if let Some(d) = detail {
-                let events = d.events.as_slice();
-                if events.is_empty() {
+                let has_links = !d.prs.is_empty() || !d.linears.is_empty();
+                if !has_links {
                     lines.push(Line::from(Span::styled(
                         "  No linked PRs or issues",
                         Style::default().fg(Palette::GHOST),
                     )));
+                }
+                for pr in &d.prs {
+                    if let Some(p) = &pr.pull_request {
+                        let label = format!(
+                            "  {} {}/{}#{} — {}",
+                            pr.relation, p.owner, p.repo, p.number, p.title,
+                        );
+                        lines.push(Line::from(Span::styled(
+                            label,
+                            Style::default().fg(Palette::TEXT),
+                        )));
+                    }
+                }
+                for li in &d.linears {
+                    if let Some(l) = &li.linear_issue {
+                        let label = format!("  {} — {}", l.identifier, l.title);
+                        lines.push(Line::from(Span::styled(
+                            label,
+                            Style::default().fg(Palette::TEXT),
+                        )));
+                    }
                 }
             } else {
                 lines.push(Line::from(Span::styled(
                     "  loading…",
                     Style::default().fg(Palette::GHOST),
                 )));
+            }
+        }
+    }
+
+    // EVENT LOG region (read mode only): append-only timeline, most recent first.
+    if !matches!(app.mode, crate::app::Mode::SidebarEdit { .. }) {
+        let loaded = app.detail_loaded_id;
+        let detail = app.detail.as_ref();
+        if loaded.is_some() && todo.id == loaded.unwrap() {
+            if let Some(d) = detail {
+                if !d.events.is_empty() {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "EVENT LOG",
+                        Style::default()
+                            .fg(Palette::ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                    for ev in d.events.iter().rev() {
+                        let parts: Vec<String> = vec![ev.kind.clone()]
+                            .into_iter()
+                            .chain(ev.field.clone())
+                            .chain(ev.old_value.clone().map(|v| format!("\"{v}\"")))
+                            .chain(ev.new_value.clone().map(|v| format!("-> \"{v}\"")))
+                            .collect();
+                        lines.push(Line::from(Span::styled(
+                            format!("  {} · {}", parts.join(" "), ev.actor),
+                            Style::default().fg(Palette::DIM),
+                        )));
+                    }
+                }
             }
         }
     }
@@ -819,7 +881,79 @@ fn text_with_caret(text: &str, caret: usize) -> String {
     out
 }
 
-/// Render the sidebar edit form when in SidebarEdit mode.
+/// Build the header span for a sidebar form field. When the field is focused
+/// the header is accent + bold (with a `▸` marker when input is active);
+/// otherwise it is dim.
+fn field_header(
+    name: &str,
+    field: crate::app::SidebarField,
+    current: crate::app::SidebarField,
+    input_active: bool,
+) -> Span<'static> {
+    if field == current {
+        let prefix = if input_active { "▸ " } else { "  " };
+        Span::styled(
+            format!("{prefix}{name}"),
+            Style::default()
+                .fg(Palette::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(format!("  {name}"), Style::default().fg(Palette::DIM))
+    }
+}
+
+/// True for PR states that are finished (closed or merged); open and draft
+/// stay active.
+fn pr_is_closed(state: &str) -> bool {
+    matches!(state, "closed" | "merged")
+}
+
+/// True for Linear state types that are finished (completed or canceled).
+fn linear_is_done(state_type: &str) -> bool {
+    matches!(state_type, "completed" | "canceled")
+}
+
+/// Case-insensitive substring test against a PR's number (as text) or title.
+fn pr_matches_search(pr: &crate::gql::PullRequest, search: &str) -> bool {
+    if search.is_empty() {
+        return true;
+    }
+    let s = search.to_ascii_lowercase();
+    pr.title.to_ascii_lowercase().contains(&s)
+        || format!("#{}", pr.number).contains(&s)
+        || format!("{}", pr.number).contains(&s)
+}
+
+/// Case-insensitive substring test against a Linear issue's identifier or title.
+fn linear_matches_search(li: &crate::gql::LinearIssue, search: &str) -> bool {
+    if search.is_empty() {
+        return true;
+    }
+    let s = search.to_ascii_lowercase();
+    li.title.to_ascii_lowercase().contains(&s) || li.identifier.to_ascii_lowercase().contains(&s)
+}
+
+/// Filtered + sorted PR candidate indices for the link attach picker.
+/// Open PRs come first, closed/merged after; ties keep source order.
+pub(crate) fn pr_picker_candidates(app: &crate::app::App, search: &str) -> Vec<usize> {
+    let mut idxs: Vec<usize> = (0..app.data.pulls.len())
+        .filter(|&i| pr_matches_search(&app.data.pulls[i], search))
+        .collect();
+    idxs.sort_by_key(|&i| pr_is_closed(&app.data.pulls[i].state));
+    idxs
+}
+
+/// Filtered + sorted Linear candidate indices for the link attach picker.
+/// Active issues come first, completed/canceled after.
+pub(crate) fn linear_picker_candidates(app: &crate::app::App, search: &str) -> Vec<usize> {
+    let mut idxs: Vec<usize> = (0..app.data.linears.len())
+        .filter(|&i| linear_matches_search(&app.data.linears[i], search))
+        .collect();
+    idxs.sort_by_key(|&i| linear_is_done(&app.data.linears[i].state_type));
+    idxs
+}
+
 fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     let crate::app::Mode::SidebarEdit {
         id,
@@ -834,6 +968,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
         link_kind,
         link_selection,
         attaching,
+        link_search,
         scroll,
         ..
     } = &app.mode
@@ -847,6 +982,7 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     let link_kind = *link_kind;
     let link_selection = *link_selection;
     let attaching = *attaching;
+    let link_search: &str = link_search;
     let scroll = *scroll;
     let title_caret = *title_caret;
     let desc_caret = *desc_caret;
@@ -893,26 +1029,12 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     lines.push(Line::from(""));
 
     // TITLE (editable form field)
-    let title_header = if field == crate::app::SidebarField::Title {
-        if input_active {
-            Span::styled(
-                "▸ TITLE",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::styled(
-                "  TITLE",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-    } else {
-        Span::styled("  TITLE", Style::default().fg(Palette::DIM))
-    };
-    lines.push(Line::from(title_header));
+    lines.push(Line::from(field_header(
+        "TITLE",
+        crate::app::SidebarField::Title,
+        field,
+        input_active,
+    )));
     if input_active && field == crate::app::SidebarField::Title {
         lines.push(Line::from(Span::styled(
             text_with_caret(title_input, title_caret),
@@ -928,28 +1050,13 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
             Style::default().fg(Palette::DIM),
         )));
     }
-    lines.push(Line::from(""));
     // DESCRIPTION
-    let desc_header = if field == crate::app::SidebarField::Description {
-        if input_active {
-            Span::styled(
-                "▸ DESCRIPTION",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::styled(
-                "  DESCRIPTION",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-    } else {
-        Span::styled("  DESCRIPTION", Style::default().fg(Palette::DIM))
-    };
-    lines.push(Line::from(desc_header));
+    lines.push(Line::from(field_header(
+        "DESCRIPTION",
+        crate::app::SidebarField::Description,
+        field,
+        input_active,
+    )));
     if input_active && field == crate::app::SidebarField::Description {
         lines.push(Line::from(Span::styled(
             text_with_caret(desc_input, desc_caret),
@@ -968,37 +1075,52 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     lines.push(Line::from(""));
 
     // LINKS
-    let links_header = if field == crate::app::SidebarField::Links {
-        if input_active {
-            Span::styled(
-                "▸ LINKS",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::styled(
-                "  LINKS",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-    } else {
-        Span::styled("  LINKS", Style::default().fg(Palette::DIM))
-    };
-    lines.push(Line::from(links_header));
+    lines.push(Line::from(field_header(
+        "LINKS",
+        crate::app::SidebarField::Links,
+        field,
+        input_active,
+    )));
     let detail = app.detail.as_ref();
-    let events = detail.map(|d| d.events.as_slice()).unwrap_or(&[]);
-    if events.is_empty() && !input_active {
+    let has_links = detail
+        .map(|d| !d.prs.is_empty() || !d.linears.is_empty())
+        .unwrap_or(false);
+    if !has_links && !input_active {
         lines.push(Line::from(Span::styled(
             "  No linked PRs or issues",
             Style::default().fg(Palette::GHOST),
         )));
     }
+    // Show currently linked PRs and Linear issues (when not in the attach picker).
+    if !input_active || field != crate::app::SidebarField::Links || !attaching {
+        if let Some(d) = detail {
+            for pr in &d.prs {
+                if let Some(p) = &pr.pull_request {
+                    let label = format!(
+                        "  {} {}/{}#{} {}",
+                        pr.relation, p.owner, p.repo, p.number, p.title,
+                    );
+                    lines.push(Line::from(Span::styled(
+                        label,
+                        Style::default().fg(Palette::TEXT),
+                    )));
+                }
+            }
+            for li in &d.linears {
+                if let Some(l) = &li.linear_issue {
+                    let label = format!("  {} {}", l.identifier, l.title);
+                    lines.push(Line::from(Span::styled(
+                        label,
+                        Style::default().fg(Palette::TEXT),
+                    )));
+                }
+            }
+        }
+    }
     if input_active && field == crate::app::SidebarField::Links {
         if attaching {
-            // Attach picker: list synced candidates for the current kind.
+            // Attach picker: list synced candidates for the current kind,
+            // filtered by `link_search` with open items before closed.
             let kind_str = match link_kind {
                 crate::app::LinkKind::Pr => "PRs",
                 crate::app::LinkKind::Linear => "Issues",
@@ -1009,31 +1131,30 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
                 ),
                 Style::default().fg(Palette::DIM),
             )));
-            let pr_candidates = link_kind == crate::app::LinkKind::Pr;
-            let candidates_len = if pr_candidates {
-                app.data.pulls.len()
+            // Search input line.
+            lines.push(Line::from(Span::styled(
+                format!("  search: {}", text_with_caret(link_search, 0)),
+                Style::default().fg(Palette::DIM),
+            )));
+            let candidates: Vec<usize> = if link_kind == crate::app::LinkKind::Pr {
+                pr_picker_candidates(app, link_search)
             } else {
-                app.data.linears.len()
+                linear_picker_candidates(app, link_search)
             };
-            if candidates_len == 0 {
+            if candidates.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "  no candidates",
                     Style::default().fg(Palette::GHOST),
                 )));
             } else {
-                for i in 0..candidates_len {
-                    let (selected, label) = if pr_candidates {
-                        let row = &app.data.pulls[i];
-                        (
-                            i == link_selection,
-                            format!("PR #{} {}", row.number, row.title),
-                        )
+                let sel = link_selection.min(candidates.len() - 1);
+                for (vis, &data_idx) in candidates.iter().enumerate() {
+                    let (selected, label) = if link_kind == crate::app::LinkKind::Pr {
+                        let row = &app.data.pulls[data_idx];
+                        (vis == sel, format!("PR #{} {}", row.number, row.title))
                     } else {
-                        let row = &app.data.linears[i];
-                        (
-                            i == link_selection,
-                            format!("{} {}", row.identifier, row.title),
-                        )
+                        let row = &app.data.linears[data_idx];
+                        (vis == sel, format!("{} {}", row.identifier, row.title))
                     };
                     if selected {
                         lines.push(Line::from(vec![
@@ -1070,26 +1191,12 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     }
 
     // TAGS
-    let tags_header = if field == crate::app::SidebarField::Tags {
-        if input_active {
-            Span::styled(
-                "▸ TAGS",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::styled(
-                "  TAGS",
-                Style::default()
-                    .fg(Palette::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-    } else {
-        Span::styled("  TAGS", Style::default().fg(Palette::DIM))
-    };
-    lines.push(Line::from(tags_header));
+    lines.push(Line::from(field_header(
+        "TAGS",
+        crate::app::SidebarField::Tags,
+        field,
+        input_active,
+    )));
     let tag_strs: Vec<String> = todo
         .tag
         .nodes
@@ -1113,6 +1220,253 @@ fn render_sidebar_edit_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
     } else {
         lines.push(Line::from(Span::styled(
             format!("  {}", tag_strs.join(" ")),
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+
+    // EVENT LOG: append-only timeline, most recent first.
+    if let Some(d) = app.detail.as_ref() {
+        if !d.events.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "EVENT LOG",
+                Style::default()
+                    .fg(Palette::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            for ev in d.events.iter().rev() {
+                let parts: Vec<String> = vec![ev.kind.clone()]
+                    .into_iter()
+                    .chain(ev.field.clone())
+                    .chain(ev.old_value.clone().map(|v| format!("\"{v}\"")))
+                    .chain(ev.new_value.clone().map(|v| format!("-> \"{v}\"")))
+                    .collect();
+                lines.push(Line::from(Span::styled(
+                    format!("  {} · {}", parts.join(" "), ev.actor),
+                    Style::default().fg(Palette::DIM),
+                )));
+            }
+        }
+    }
+
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((scroll as u16, 0)),
+        inner,
+    );
+}
+
+/// Render the sidebar add form when in SidebarAdd mode. Mirrors the edit
+/// form but with empty fields, no existing todo, and a CREATE title.
+fn render_sidebar_add_form(f: &mut Frame, app: &crate::app::App, area: Rect) {
+    let crate::app::Mode::SidebarAdd {
+        field,
+        input_active,
+        title_input,
+        title_caret,
+        desc_input,
+        desc_caret,
+        tag_input,
+        tag_caret,
+        link_kind,
+        link_selection,
+        attaching,
+        link_search,
+        scroll,
+        ..
+    } = &app.mode
+    else {
+        return;
+    };
+
+    let field = *field;
+    let input_active = *input_active;
+    let link_kind = *link_kind;
+    let link_selection = *link_selection;
+    let attaching = *attaching;
+    let scroll = *scroll;
+    let title_caret = *title_caret;
+    let desc_caret = *desc_caret;
+    let tag_caret = *tag_caret;
+    let title_input: &str = title_input;
+    let desc_input: &str = desc_input;
+    let tag_input: &str = tag_input;
+    let link_search: &str = link_search;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::ACCENT))
+        .title(Span::styled(
+            " CREATE ",
+            Style::default().fg(Palette::ACCENT),
+        ));
+    f.render_widget(block, area);
+
+    let inner = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    );
+    if inner.height == 0 {
+        return;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "new todo",
+        Style::default().fg(Palette::DIM),
+    )));
+    lines.push(Line::from(""));
+
+    // TITLE
+    lines.push(Line::from(field_header(
+        "TITLE",
+        crate::app::SidebarField::Title,
+        field,
+        input_active,
+    )));
+    if input_active && field == crate::app::SidebarField::Title {
+        lines.push(Line::from(Span::styled(
+            text_with_caret(title_input, title_caret),
+            Style::default().fg(Palette::TEXT),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            if title_input.is_empty() {
+                "—"
+            } else {
+                title_input
+            },
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    // DESCRIPTION
+    lines.push(Line::from(field_header(
+        "DESCRIPTION",
+        crate::app::SidebarField::Description,
+        field,
+        input_active,
+    )));
+    if input_active && field == crate::app::SidebarField::Description {
+        lines.push(Line::from(Span::styled(
+            text_with_caret(desc_input, desc_caret),
+            Style::default().fg(Palette::TEXT),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            if desc_input.is_empty() {
+                "—"
+            } else {
+                desc_input
+            },
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    // LINKS
+    lines.push(Line::from(field_header(
+        "LINKS",
+        crate::app::SidebarField::Links,
+        field,
+        input_active,
+    )));
+    if input_active && field == crate::app::SidebarField::Links {
+        if attaching {
+            let kind_str = match link_kind {
+                crate::app::LinkKind::Pr => "PRs",
+                crate::app::LinkKind::Linear => "Issues",
+            };
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  attach {kind_str} (tab: kind · j/k: move · enter: attach · esc: cancel)"
+                ),
+                Style::default().fg(Palette::DIM),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("  search: {}", text_with_caret(link_search, 0)),
+                Style::default().fg(Palette::DIM),
+            )));
+            let candidates: Vec<usize> = if link_kind == crate::app::LinkKind::Pr {
+                pr_picker_candidates(app, link_search)
+            } else {
+                linear_picker_candidates(app, link_search)
+            };
+            if candidates.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  no candidates",
+                    Style::default().fg(Palette::GHOST),
+                )));
+            } else {
+                let sel = link_selection.min(candidates.len() - 1);
+                for (vis, &data_idx) in candidates.iter().enumerate() {
+                    let (selected, label) = if link_kind == crate::app::LinkKind::Pr {
+                        let row = &app.data.pulls[data_idx];
+                        (vis == sel, format!("PR #{} {}", row.number, row.title))
+                    } else {
+                        let row = &app.data.linears[data_idx];
+                        (vis == sel, format!("{} {}", row.identifier, row.title))
+                    };
+                    if selected {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                Glyph::CURSOR.to_string(),
+                                Style::default().fg(Palette::ACCENT),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(
+                                label,
+                                Style::default()
+                                    .fg(Palette::ACCENT)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            format!("  {label}"),
+                            Style::default().fg(Palette::TEXT),
+                        )));
+                    }
+                }
+            }
+        } else {
+            lines.push(Line::from(Span::styled(
+                "  press a to attach a PR or issue",
+                Style::default().fg(Palette::GHOST),
+            )));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            "  —",
+            Style::default().fg(Palette::DIM),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    // TAGS
+    lines.push(Line::from(field_header(
+        "TAGS",
+        crate::app::SidebarField::Tags,
+        field,
+        input_active,
+    )));
+    if input_active && field == crate::app::SidebarField::Tags {
+        lines.push(Line::from(Span::styled(
+            text_with_caret(tag_input, tag_caret),
+            Style::default().fg(Palette::TEXT),
+        )));
+    } else if tag_input.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  —",
+            Style::default().fg(Palette::DIM),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", tag_input),
             Style::default().fg(Palette::DIM),
         )));
     }
@@ -1181,6 +1535,7 @@ mod tests {
             link_kind: crate::app::LinkKind::Pr,
             link_selection: 0,
             attaching: false,
+            link_search: String::new(),
             scroll: 0,
         };
         let hints = crate::frame::status_hints(&app);
@@ -1211,6 +1566,7 @@ mod tests {
             link_kind: crate::app::LinkKind::Pr,
             link_selection: 0,
             attaching: false,
+            link_search: String::new(),
             scroll: 0,
         };
         let hints = crate::frame::status_hints(&app);

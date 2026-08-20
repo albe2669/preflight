@@ -132,9 +132,27 @@ pub(crate) async fn handle_navigate(
             app.show_done = !app.show_done;
         }
         KeyCode::Char('a') => {
-            app.mode = Mode::InlineCreate {
-                input: String::new(),
-            };
+            if app.content_width < 100 {
+                app.set_error("terminal too narrow for sidebar");
+            } else {
+                app.mode = Mode::SidebarAdd {
+                    field: SidebarField::Title,
+                    input_active: false,
+                    title_input: String::new(),
+                    title_caret: 0,
+                    desc_input: String::new(),
+                    desc_caret: 0,
+                    desc_scroll: 0,
+                    tag_input: String::new(),
+                    tag_caret: 0,
+                    link_kind: LinkKind::Pr,
+                    link_selection: 0,
+                    attaching: false,
+                    link_search: String::new(),
+                    pending_link_pr: Vec::new(),
+                    scroll: 0,
+                };
+            }
         }
         KeyCode::Char('r') => {
             if let Some(td) = app.backlog().get(app.cursor) {
@@ -162,6 +180,7 @@ pub(crate) async fn handle_navigate(
                     link_kind: LinkKind::Pr,
                     link_selection: 0,
                     attaching: false,
+                    link_search: String::new(),
                     scroll: 0,
                 };
                 super::fetch_detail(app, client, tx, id);

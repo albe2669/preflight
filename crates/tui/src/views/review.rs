@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 use tokio::sync::mpsc;
 
-use crate::app::{App, ToastKind};
+use crate::app::App;
 use crate::frame;
 use crate::gql;
 use crate::theme::{Glyph, Palette};
@@ -115,38 +115,20 @@ pub(crate) async fn handle_navigate(
     match key {
         KeyCode::Char('h') | KeyCode::Left => {
             app.review_date -= chrono::Duration::days(1);
-            fetch_review(app, client, tx).await;
+            super::fetch_review(app, client, tx);
         }
         KeyCode::Char('l') | KeyCode::Right => {
             app.review_date += chrono::Duration::days(1);
-            fetch_review(app, client, tx).await;
+            super::fetch_review(app, client, tx);
         }
         KeyCode::Char('g') => {
             // Go to today's review.
             app.review_date = app.logical_date;
-            fetch_review(app, client, tx).await;
+            super::fetch_review(app, client, tx);
         }
         _ => {}
     }
     Ok(false)
-}
-
-async fn fetch_review(app: &mut App, client: &gql::Client, tx: &mpsc::Sender<crate::AppMsg>) {
-    let date = app.review_date.format("%Y-%m-%d").to_string();
-    let c = client.clone();
-    let t = tx.clone();
-    tokio::spawn(async move {
-        match c.daily_review(&date).await {
-            Ok(r) => {
-                let _ = t.send(crate::AppMsg::DailyReview(r)).await;
-            }
-            Err(e) => {
-                let _ = t
-                    .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
-                    .await;
-            }
-        }
-    });
 }
 
 #[cfg(test)]

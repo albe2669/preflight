@@ -82,6 +82,12 @@ pub struct PullRequest {
     pub review_requested: bool,
     #[cynic(rename = "authoredByMe")]
     pub authored_by_me: bool,
+    #[cynic(rename = "changesRequested")]
+    pub changes_requested: bool,
+    #[cynic(rename = "copilotComments")]
+    pub copilot_comments: bool,
+    #[cynic(rename = "mergeConflicts")]
+    pub merge_conflicts: bool,
     #[cynic(rename = "dismissedAt")]
     pub dismissed_at: Option<String>,
 }

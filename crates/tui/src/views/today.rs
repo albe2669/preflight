@@ -14,9 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use tokio::sync::mpsc;
 
-use crate::app::{
-    App, ConfirmAction, LinkKind, Mode, SidebarField, ToastKind, View, matches_filter,
-};
+use crate::app::{App, ConfirmAction, LinkKind, Mode, SidebarField, View, matches_filter};
 use crate::frame;
 use crate::gql;
 use crate::theme::Palette;
@@ -147,9 +145,27 @@ pub(crate) async fn handle_navigate(
             app.cursor -= 1;
         }
         KeyCode::Char('a') => {
-            app.mode = Mode::InlineCreate {
-                input: String::new(),
-            };
+            if app.content_width < 100 {
+                app.set_error("terminal too narrow for sidebar");
+            } else {
+                app.mode = Mode::SidebarAdd {
+                    field: SidebarField::Title,
+                    input_active: false,
+                    title_input: String::new(),
+                    title_caret: 0,
+                    desc_input: String::new(),
+                    desc_caret: 0,
+                    desc_scroll: 0,
+                    tag_input: String::new(),
+                    tag_caret: 0,
+                    link_kind: LinkKind::Pr,
+                    link_selection: 0,
+                    attaching: false,
+                    link_search: String::new(),
+                    pending_link_pr: Vec::new(),
+                    scroll: 0,
+                };
+            }
         }
         KeyCode::Char('r') => {
             if let Some(td) = app.today_plan().get(app.cursor) {
@@ -179,6 +195,7 @@ pub(crate) async fn handle_navigate(
                     link_kind: LinkKind::Pr,
                     link_selection: 0,
                     attaching: false,
+                    link_search: String::new(),
                     scroll: 0,
                 };
                 super::fetch_detail(app, client, tx, id);
@@ -233,29 +250,11 @@ pub(crate) async fn handle_navigate(
             // Daily review of yesterday.
             app.view = View::Review;
             app.review_date = app.logical_date - chrono::Duration::days(1);
-            fetch_review(app, client, tx).await;
+            super::fetch_review(app, client, tx);
         }
         _ => {}
     }
     Ok(false)
-}
-
-async fn fetch_review(app: &mut App, client: &gql::Client, tx: &mpsc::Sender<crate::AppMsg>) {
-    let date = app.review_date.format("%Y-%m-%d").to_string();
-    let c = client.clone();
-    let t = tx.clone();
-    tokio::spawn(async move {
-        match c.daily_review(&date).await {
-            Ok(r) => {
-                let _ = t.send(crate::AppMsg::DailyReview(r)).await;
-            }
-            Err(e) => {
-                let _ = t
-                    .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
-                    .await;
-            }
-        }
-    });
 }
 
 #[cfg(test)]

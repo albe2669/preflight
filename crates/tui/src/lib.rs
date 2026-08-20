@@ -83,7 +83,12 @@ pub async fn run(endpoint: &str) -> anyhow::Result<()> {
 pub(crate) enum AppMsg {
     FetchAll(gql::FetchAll),
     DailyReview(gql::DailyReview),
-    DetailData(i32, Vec<gql::TodoEvent>),
+    DetailData(
+        i32,
+        Vec<gql::TodoEvent>,
+        Vec<gql::TodoPullRequest>,
+        Vec<gql::TodoLinearIssue>,
+    ),
     Toast(ToastKind, String),
     Refresh,
 }
@@ -119,10 +124,12 @@ async fn run_loop(
                     app.clamp_cursor_to_active();
                 }
                 AppMsg::DailyReview(r) => app.review = Some(r),
-                AppMsg::DetailData(id, events) => {
+                AppMsg::DetailData(id, events, prs, linears) => {
                     app.detail = Some(crate::app::DetailData {
                         tags: Vec::new(),
                         events,
+                        prs,
+                        linears,
                     });
                     let _ = id;
                 }
@@ -168,6 +175,9 @@ pub(crate) async fn handle_key(
             app.view = View::ALL[(idx + 1) % View::ALL.len()];
             app.cursor = 0;
             app.clamp_cursor_to_active();
+            if app.view == View::Review {
+                views::fetch_review(app, client, tx);
+            }
             return Ok(false);
         }
         BackTab if app.mode == Mode::Navigate => {
@@ -175,6 +185,9 @@ pub(crate) async fn handle_key(
             app.view = View::ALL[(idx + View::ALL.len() - 1) % View::ALL.len()];
             app.cursor = 0;
             app.clamp_cursor_to_active();
+            if app.view == View::Review {
+                views::fetch_review(app, client, tx);
+            }
             return Ok(false);
         }
         Char('?') if app.mode == Mode::Navigate => {
@@ -190,7 +203,7 @@ pub(crate) async fn handle_key(
                     app.toast = None;
                     return Ok(false);
                 }
-                Mode::SidebarEdit { .. } => {
+                Mode::SidebarEdit { .. } | Mode::SidebarAdd { .. } => {
                     // Let the handler own the Esc logic
                 }
                 _ => {
@@ -224,6 +237,7 @@ pub(crate) async fn handle_key(
             reason,
         } => views::handle_status_select(app, key, client, tx, id, selection, reason).await,
         Mode::SidebarEdit { .. } => views::handle_sidebar_edit(app, key, client, tx).await,
+        Mode::SidebarAdd { .. } => views::handle_sidebar_add(app, key, client, tx).await,
     }
 }
 

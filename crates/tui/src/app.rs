@@ -7,7 +7,9 @@
 
 use std::collections::HashSet;
 
-use crate::gql::{DailyReview, PullRequest, SyncState, Tag, Todo, TodoEvent};
+use crate::gql::{
+    DailyReview, PullRequest, SyncState, Tag, Todo, TodoEvent, TodoLinearIssue, TodoPullRequest,
+};
 
 /// The five top-level views plus the detail overlay.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -91,6 +93,24 @@ pub enum Mode {
         link_kind: LinkKind,
         link_selection: usize,
         attaching: bool,
+        link_search: String,
+        scroll: usize,
+    },
+    SidebarAdd {
+        field: SidebarField,
+        input_active: bool,
+        title_input: String,
+        title_caret: usize,
+        desc_input: String,
+        desc_caret: usize,
+        desc_scroll: usize,
+        tag_input: String,
+        tag_caret: usize,
+        link_kind: LinkKind,
+        link_selection: usize,
+        attaching: bool,
+        link_search: String,
+        pending_link_pr: Vec<i32>,
         scroll: usize,
     },
 }
@@ -185,6 +205,8 @@ pub struct App {
 pub struct DetailData {
     pub tags: Vec<Tag>,
     pub events: Vec<TodoEvent>,
+    pub prs: Vec<TodoPullRequest>,
+    pub linears: Vec<TodoLinearIssue>,
 }
 
 impl Default for App {
@@ -263,21 +285,28 @@ impl App {
         )
     }
 
-    /// Non-dismissed PRs.
+    /// Non-dismissed PRs, open/draft before closed/merged (source order within).
     pub fn inbox_prs(&self) -> Vec<&PullRequest> {
-        self.data
+        let mut prs: Vec<&PullRequest> = self
+            .data
             .pulls
             .iter()
             .filter(|p| self.show_dismissed || p.dismissed_at.is_none())
-            .collect()
+            .collect();
+        prs.sort_by_key(|p| matches!(p.state.as_str(), "closed" | "merged" | "draft"));
+        prs
     }
 
+    /// Non-dismissed Linear issues, active before completed/canceled.
     pub fn inbox_linears(&self) -> Vec<&crate::gql::LinearIssue> {
-        self.data
+        let mut linears: Vec<&crate::gql::LinearIssue> = self
+            .data
             .linears
             .iter()
             .filter(|l| self.show_dismissed || l.dismissed_at.is_none())
-            .collect()
+            .collect();
+        linears.sort_by_key(|l| matches!(l.state_type.as_str(), "completed" | "canceled"));
+        linears
     }
 
     pub fn sync_by_source(&self, source: &str) -> Option<&SyncState> {
@@ -487,6 +516,9 @@ pub(crate) mod tests {
             author: None,
             state: "open".to_string(),
             review_requested: false,
+            changes_requested: false,
+            copilot_comments: false,
+            merge_conflicts: false,
             authored_by_me: false,
             dismissed_at: dismissed_at.map(|s| s.to_string()),
         }
@@ -505,6 +537,41 @@ pub(crate) mod tests {
             assignee_name: None,
             assigned_to_me: false,
             dismissed_at: dismissed_at.map(|s| s.to_string()),
+        }
+    }
+
+    pub(crate) fn make_todo_pr(
+        pr: crate::gql::PullRequest,
+        relation: &str,
+    ) -> crate::gql::TodoPullRequest {
+        crate::gql::TodoPullRequest {
+            relation: relation.to_string(),
+            pull_request_id: pr.id,
+            pull_request: Some(pr),
+        }
+    }
+
+    pub(crate) fn make_todo_linear(li: crate::gql::LinearIssue) -> crate::gql::TodoLinearIssue {
+        crate::gql::TodoLinearIssue {
+            linear_issue_id: li.id,
+            linear_issue: Some(li),
+        }
+    }
+
+    pub(crate) fn make_event(
+        id: i32,
+        kind: &str,
+        field: Option<&str>,
+        actor: &str,
+    ) -> crate::gql::TodoEvent {
+        crate::gql::TodoEvent {
+            id,
+            kind: kind.to_string(),
+            field: field.map(|s| s.to_string()),
+            old_value: None,
+            new_value: None,
+            actor: actor.to_string(),
+            occurred_at: "2026-08-05 14:31:00 +00:00".to_string(),
         }
     }
 
