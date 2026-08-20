@@ -16,11 +16,9 @@
 pkgs.buildNpmPackage {
   pname = "preflight-frontend";
   version = "0.1.0";
-  inherit src;
+  src = "${src}/frontend";
 
-  sourceRoot = "${src.name}/frontend";
-
-  npmDepsHash = pkgs.lib.fakeHash;
+  npmDepsHash = "sha256-fW4VfnDypqmNyJF+YIW/dSd86pJm9ggwlzJVVbJmvys=";
 
   # Production build: the SPA posts to the same origin.
   npmBuildScript = "build";

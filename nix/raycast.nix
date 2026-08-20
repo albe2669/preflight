@@ -12,11 +12,9 @@
 pkgs.buildNpmPackage {
   pname = "preflight-raycast";
   version = "0.1.0";
-  inherit src;
+  src = "${src}/raycast";
 
-  sourceRoot = "${src.name}/raycast";
-
-  npmDepsHash = pkgs.lib.fakeHash;
+  npmDepsHash = "sha256-3DmvO7mzwacxoH9K6VyZlneFuV9mxXC0ZhCDXx4zs+E=";
 
   # Install dependencies without running the build script (which needs `ray`,
   # the Raycast CLI — not available in Nix). We bundle with esbuild instead.
@@ -25,6 +23,8 @@ pkgs.buildNpmPackage {
   nativeBuildInputs = [ pkgs.esbuild ];
 
   # Bundle each command entry point with esbuild, matching `ray build` output.
+  # Avoid `out` as a loop variable: it shadows the stdenv `$out` output path
+  # in the shared phase shell and breaks `installPhase`.
   buildPhase = ''
     runHook preBuild
 
@@ -38,10 +38,10 @@ pkgs.buildNpmPackage {
 
     for entry in "''${commands[@]}"; do
       src=''${entry%%:*}
-      out=''${entry##*:}
+      outfile=''${entry##*:}
       esbuild "$src" \
         --bundle \
-        --outfile="$out" \
+        --outfile="$outfile" \
         --format=esm \
         --platform=node \
         --target=node20 \
