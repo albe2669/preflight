@@ -12,7 +12,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 
 async fn graphql_playground() -> impl IntoResponse {
-    response::Html(playground_source(GraphQLPlaygroundConfig::new("/")))
+    response::Html(playground_source(GraphQLPlaygroundConfig::new("/graphql")))
 }
 
 async fn graphql_handler(State(schema): State<Schema>, req: GraphQLRequest) -> GraphQLResponse {
@@ -22,7 +22,7 @@ async fn graphql_handler(State(schema): State<Schema>, req: GraphQLRequest) -> G
 pub fn router(schema: Schema, cors_origins: &[String], frontend_dist: Option<&str>) -> Router {
     let cors = build_cors(cors_origins);
     let mut router = Router::new()
-        .route("/", get(graphql_playground).post(graphql_handler))
+        .route("/graphql", get(graphql_playground).post(graphql_handler))
         .with_state(schema)
         .layer(cors);
     if let Some(path) = frontend_dist {

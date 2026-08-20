@@ -5,9 +5,8 @@
 # `frontend_dist` config option so the server serves the SPA from the same
 # origin as the GraphQL endpoint.
 #
-# `VITE_GRAPHQL_ENDPOINT=/` makes the production build POST to the same
-# origin's root path (the server's graphql handler at `/`), replacing the
-# Vite dev proxy.
+# `VITE_GRAPHQL_ENDPOINT=/graphql` makes the production build POST to the
+# `/graphql` path on the same origin, matching the server route.
 {
   pkgs,
   src,
@@ -24,7 +23,7 @@ pkgs.buildNpmPackage {
   npmBuildScript = "build";
 
   env = {
-    VITE_GRAPHQL_ENDPOINT = "/";
+    VITE_GRAPHQL_ENDPOINT = "/graphql";
   };
 
   installPhase = ''

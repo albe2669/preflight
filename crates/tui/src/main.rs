@@ -5,7 +5,7 @@ use serde::Deserialize;
 /// GraphQL endpoint resolution:
 ///   1. `PREFLIGHT_GRAPHQL_ENDPOINT` env (explicit override),
 ///   2. `[server]` host+port from `~/.config/preflight/config.toml`,
-///   3. `http://127.0.0.1:8000/`.
+///   3. `http://127.0.0.1:8000/graphql`.
 fn resolve_endpoint() -> String {
     if let Ok(ep) = std::env::var("PREFLIGHT_GRAPHQL_ENDPOINT") {
         return ep;
@@ -14,12 +14,12 @@ fn resolve_endpoint() -> String {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(cfg) = toml::from_str::<EndpointConfig>(&content) {
                 if let Some(s) = cfg.server {
-                    return format!("http://{}:{}/", s.host, s.port);
+                    return format!("http://{}:{}/graphql", s.host, s.port);
                 }
             }
         }
     }
-    "http://127.0.0.1:8000/".to_string()
+    "http://127.0.0.1:8000/graphql".to_string()
 }
 
 /// Only the `[server]` table is read; all other sections are ignored.

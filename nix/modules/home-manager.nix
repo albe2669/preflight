@@ -50,7 +50,7 @@ let
   # is customized.
   serverAddr = "${cfg.settings.server.host}:${toString cfg.settings.server.port}";
   tuiLauncher = pkgs.writeShellScriptBin "pftui" ''
-    export PREFLIGHT_GRAPHQL_ENDPOINT="http://${serverAddr}/"
+    export PREFLIGHT_GRAPHQL_ENDPOINT="http://${serverAddr}/graphql"
     exec "${cfg.package}/bin/pftui" "$@"
   '';
 

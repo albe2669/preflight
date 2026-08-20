@@ -8,8 +8,9 @@ it. No business logic lives here.
 
 ## Exposed API
 
-Binary `server` — serves GraphQL at `http://<host>:<port>/` with a Playground
-at the same path.
+Binary `server` — serves GraphQL at `http://<host>:<port>/graphql` with a
+Playground at the same path. When `frontend_dist` is set, the SPA is served
+from `/` via `ServeDir`.
 
 ## Internal flow
 
@@ -20,9 +21,8 @@ at the same path.
 - `config.rs` — `Config` struct deserialized from `config/default.toml` (or
   `CONFIG` env var). `Config::load` never panics.
 - `db.rs` — SQLite pool with `PRAGMA foreign_keys = ON`, WAL journal, and a
-  busy timeout. `migrate` applies all pending migrations.
-- `routes.rs` — the axum `Router`: `/` GET = Playground, `/` POST = GraphQL
-  handler.
+- `routes.rs` — the axum `Router`: `/graphql` GET = Playground, `/graphql`
+  POST = GraphQL handler, `/` = `ServeDir` fallback (when `frontend_dist` set).
 
 ## External flow
 

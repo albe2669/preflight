@@ -14,7 +14,7 @@ import type {
   LinkRelation,
 } from "../types";
 
-const DEFAULT_ENDPOINT = "http://127.0.0.1:8000/";
+const DEFAULT_ENDPOINT = "http://127.0.0.1:8000/graphql";
 
 /** Path to the shared preflight config file ($XDG_CONFIG_HOME or $HOME/.config). */
 function configPath(): string {
@@ -56,7 +56,7 @@ export function readConfig(): { host?: string; port?: number } {
 export function preferredEndpoint(): string {
   const { host, port } = readConfig();
   if (host && port != null && Number.isFinite(port)) {
-    return `http://${host}:${port}/`;
+    return `http://${host}:${port}/graphql`;
   }
   return DEFAULT_ENDPOINT;
 }

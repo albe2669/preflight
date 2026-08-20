@@ -1,0 +1,4 @@
+{"timestamp":"2026-08-20T14:57:55.443782Z","level":"INFO","fields":{"message":"logging initialized","level":"info","level_source":"config","directory":"logs","directory_source":"config"},"target":"server"}
+{"timestamp":"2026-08-20T14:57:55.451043Z","level":"INFO","fields":{"message":"Applying all pending migrations"},"target":"sea_orm_migration::migrator::exec"}
+{"timestamp":"2026-08-20T14:57:55.451081Z","level":"INFO","fields":{"message":"No pending migrations"},"target":"sea_orm_migration::migrator::exec"}
+{"timestamp":"2026-08-20T14:57:55.465356Z","level":"INFO","fields":{"message":"GraphQL Playground at http://127.0.0.1:8000"},"target":"server"}
