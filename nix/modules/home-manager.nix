@@ -34,7 +34,13 @@ let
         clock = cfg.settings.clock;
         logging = cfg.settings.logging;
         sync = cfg.settings.sync;
-        server = cfg.settings.server;
+        server = cfg.settings.server // {
+          frontendDist =
+            if cfg.installFrontend && cfg.settings.server.frontendDist == null then
+              "${cfg.frontendPackage}"
+            else
+              cfg.settings.server.frontendDist;
+        };
       };
 
   # TUI launcher that points the tui at the server's configured host/port via
@@ -69,6 +75,45 @@ in
       default = pkgs.preflight;
       defaultText = "pkgs.preflight (the flake's package, exposed via overlay)";
       description = "The preflight package to install. Defaults to the flake package.";
+    };
+
+    installFrontend = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Build and serve the web frontend from the preflight server. When
+        enabled, the frontend_dist config option is set to the built static
+        directory and the server serves the SPA at the same origin as the
+        GraphQL endpoint.
+      '';
+    };
+
+    frontendPackage = lib.mkOption {
+      type = lib.types.package;
+      default =
+        pkgs.preflight-frontend
+          or (throw "preflight-frontend package not found; import the flake overlay or set frontendPackage explicitly");
+      defaultText = "pkgs.preflight-frontend (the flake's frontend package)";
+      description = "The preflight frontend package to serve. Defaults to the flake package.";
+    };
+
+    installRaycast = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Symlink the preflight Raycast extension into the Raycast extensions
+        directory (`$XDG_CONFIG_HOME/raycast/extensions/preflight`). The
+        Raycast app picks it up automatically. Only relevant on macOS.
+      '';
+    };
+
+    raycastPackage = lib.mkOption {
+      type = lib.types.package;
+      default =
+        pkgs.preflight-raycast
+          or (throw "preflight-raycast package not found; import the flake overlay or set raycastPackage explicitly");
+      defaultText = "pkgs.preflight-raycast (the flake's Raycast package)";
+      description = "The preflight Raycast extension package to install. Defaults to the flake package.";
     };
 
     installService = lib.mkOption {
@@ -279,6 +324,11 @@ in
               default = [ ];
               description = "Origins the web frontend may call from. Empty uses the server's built-in Vite dev defaults.";
             };
+            frontendDist = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Path to a static directory the server serves as the web frontend. Set automatically when installFrontend is enabled.";
+            };
           };
         };
         default = { };
@@ -332,6 +382,12 @@ in
         ProcessType = "Background";
         RunAtLoad = true;
       };
+    };
+
+    # Symlink the Raycast extension into the Raycast extensions directory so
+    # the Raycast app picks it up automatically.
+    xdg.configFile."raycast/extensions/preflight" = lib.mkIf cfg.installRaycast {
+      source = "${cfg.raycastPackage}";
     };
   };
 }

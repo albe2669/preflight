@@ -7,6 +7,8 @@
 #   - that enabling the module installs `preflight` and `pftui` launchers
 #   - the rendered config.toml parses into the exact section/option layout
 #     the server's `Config` structs expect.
+#   - frontend_dist is omitted when null (installFrontend defaults to true but
+#     the fake eval has no frontend package, so the path is null)
 #
 # Run: nix-instantiate --strict --eval nix/tests/eval-module.nix
 let
@@ -54,6 +56,7 @@ let
       ({ config, lib, ... }: {
         imports = [ module ];
         config.programs.preflight.enable = true;
+        config.programs.preflight.installFrontend = false;
         config.programs.preflight.settings.clock.timezone = "America/New_York";
         config.programs.preflight.settings.sync.githubTokenPath = "/run/secrets/gh";
         config.programs.preflight.settings.sync.linearTokenPath = "/run/secrets/lin";
@@ -70,6 +73,7 @@ let
       ({ config, lib, ... }: {
         imports = [ module ];
         config.programs.preflight.enable = true;
+        config.programs.preflight.installFrontend = false;
         config.programs.preflight.settings.logging.level = "DEBUG";
         config.programs.preflight.settings.logging.directory = "/var/log/preflight";
         config.programs.preflight.settings.server.corsOrigins = [
@@ -109,6 +113,7 @@ let
     && lib.hasInfix "directory = \"/var/log/preflight\"" renderedOverride;
   corsDefaultOk = lib.hasInfix "cors_origins = []" rendered;
   corsOverrideOk = lib.hasInfix "cors_origins = [\"https://preflight.example.com\", \"http://localhost:5173\"]" renderedOverride;
+  frontendDistDefaultOk = !(lib.hasInfix "frontend_dist" rendered);
 in
 # Enforce the render assertions: a false value aborts evaluation so a
 # toml.nix regression cannot pass silently.
@@ -116,6 +121,7 @@ assert loggingDefaultOk;
 assert loggingOverrideOk;
 assert corsDefaultOk;
 assert corsOverrideOk;
+assert frontendDistDefaultOk;
 {
   dbPath = settings.database.path;
   host = settings.server.host;
@@ -128,5 +134,6 @@ assert corsOverrideOk;
     loggingOverrideOk
     corsDefaultOk
     corsOverrideOk
+    frontendDistDefaultOk
     ;
 }
