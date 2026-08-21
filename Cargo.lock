@@ -1263,6 +1263,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
+name = "e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-graphql",
+ "async-graphql-axum",
+ "axum",
+ "chrono",
+ "chrono-tz",
+ "github",
+ "graphql",
+ "linear",
+ "links",
+ "migration",
+ "reqwest",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde_json",
+ "sqlx",
+ "sync-state",
+ "tempfile",
+ "todo-domain",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

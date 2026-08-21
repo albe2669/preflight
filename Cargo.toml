@@ -11,6 +11,7 @@ members = [
     "crates/links",
     "crates/remote-sync",
     "crates/sync-state",
+    "crates/e2e",
 ]
 
 [workspace.package]

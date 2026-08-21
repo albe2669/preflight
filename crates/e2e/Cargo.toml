@@ -1,0 +1,37 @@
+[package]
+name = "e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "e2e"
+path = "src/lib.rs"
+
+[features]
+default = []
+e2e = []
+
+[dependencies]
+todo-domain.workspace = true
+links.workspace = true
+github.workspace = true
+linear.workspace = true
+graphql.workspace = true
+migration.workspace = true
+sync-state.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+async-graphql.workspace = true
+async-graphql-axum.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tower.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde_json.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["sqlite"] }
+tempfile = "3"
+anyhow.workspace = true
