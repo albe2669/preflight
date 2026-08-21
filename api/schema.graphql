@@ -130,6 +130,9 @@ input PullRequestFilterInput {
   remoteUpdatedAt: TextFilterInput
   syncedAt: TextFilterInput
   dismissedAt: TextFilterInput
+  changesRequested: BooleanFilterInput
+  copilotComments: BooleanFilterInput
+  mergeConflicts: BooleanFilterInput
   and: [PullRequestFilterInput!]
   or: [PullRequestFilterInput!]
   not: PullRequestFilterInput
@@ -155,6 +158,9 @@ input PullRequestOrderInput {
   remoteUpdatedAt: OrderByEnum
   syncedAt: OrderByEnum
   dismissedAt: OrderByEnum
+  changesRequested: OrderByEnum
+  copilotComments: OrderByEnum
+  mergeConflicts: OrderByEnum
 }
 
 input StringFilterInput {
@@ -399,6 +405,12 @@ type Array {
   array: ColumnType!
 }
 
+type Clock {
+  logicalDate: String!
+  timezone: String!
+  dayStartHour: Int!
+}
+
 type Column {
   name: String!
   type_: ColumnType!
@@ -419,12 +431,6 @@ type DailyReview {
   touched: [Todo!]!
   completed: [Todo!]!
   carriedOver: [Todo!]!
-}
-
-type Clock {
-  logicalDate: String!
-  timezone: String!
-  dayStartHour: Int!
 }
 
 type Enumeration {
@@ -463,28 +469,6 @@ type LinearIssueEdge {
   node: LinearIssue!
 }
 
-type Mutation {
-  _ping: String
-  createTodo(title: String!, description: String): Todo!
-  updateTodo(id: Int!, title: String, description: String): Todo!
-  setTodoStatus(id: Int!, status: TodoStatusEnum!, blockedReason: String): Todo!
-  planForToday(todoId: Int!): TodoDayPlan!
-  unplanForToday(todoId: Int!): Boolean!
-  reorderDayPlan(date: String!, todoIds: [Int!]!): [TodoDayPlan!]!
-  carryOverUnfinished(from: String!, to: String!): [TodoDayPlan!]!
-  addTag(todoId: Int!, slug: String!): Todo!
-  removeTag(todoId: Int!, slug: String!): Todo!
-  todoFromPullRequest(pullRequestId: Int!, planToday: Boolean!): Todo!
-  linkPullRequest(todoId: Int!, pullRequestId: Int!, relation: LinkRelationEnum!): Todo!
-  dismissPullRequest(id: Int!): PullRequest!
-  todoFromLinearIssue(linearIssueId: Int!, planToday: Boolean!): Todo!
-  linkLinearIssue(todoId: Int!, linearIssueId: Int!): Todo!
-  unlinkPullRequest(todoId: Int!, pullRequestId: Int!): Todo!
-  unlinkLinearIssue(todoId: Int!, linearIssueId: Int!): Todo!
-  syncLinear: SyncState!
-  syncGithub: SyncState!
-}
-
 type PageInfo {
   hasPreviousPage: Boolean!
   hasNextPage: Boolean!
@@ -511,13 +495,13 @@ type PullRequest {
   state: String!
   reviewRequested: Boolean!
   authoredByMe: Boolean!
-  changesRequested: Boolean!
-  copilotComments: Boolean!
-  mergeConflicts: Boolean!
   remoteCreatedAt: String
   remoteUpdatedAt: String
   syncedAt: String!
   dismissedAt: String
+  changesRequested: Boolean!
+  copilotComments: Boolean!
+  mergeConflicts: Boolean!
 }
 
 type PullRequestConnection {
@@ -530,22 +514,6 @@ type PullRequestConnection {
 type PullRequestEdge {
   cursor: String!
   node: PullRequest!
-}
-
-type Query {
-  todo(filters: TodoFilterInput, having: TodoHavingInput, orderBy: TodoOrderInput, pagination: PaginationInput): TodoConnection!
-  tag(filters: TagFilterInput, having: TagHavingInput, orderBy: TagOrderInput, pagination: PaginationInput): TagConnection!
-  todoTag(filters: TodoTagFilterInput, having: TodoTagHavingInput, orderBy: TodoTagOrderInput, pagination: PaginationInput): TodoTagConnection!
-  todoDayPlan(filters: TodoDayPlanFilterInput, having: TodoDayPlanHavingInput, orderBy: TodoDayPlanOrderInput, pagination: PaginationInput): TodoDayPlanConnection!
-  todoEvent(filters: TodoEventFilterInput, having: TodoEventHavingInput, orderBy: TodoEventOrderInput, pagination: PaginationInput): TodoEventConnection!
-  pullRequest(filters: PullRequestFilterInput, having: PullRequestHavingInput, orderBy: PullRequestOrderInput, pagination: PaginationInput): PullRequestConnection!
-  todoPullRequest(filters: TodoPullRequestFilterInput, having: TodoPullRequestHavingInput, orderBy: TodoPullRequestOrderInput, pagination: PaginationInput): TodoPullRequestConnection!
-  linearIssue(filters: LinearIssueFilterInput, having: LinearIssueHavingInput, orderBy: LinearIssueOrderInput, pagination: PaginationInput): LinearIssueConnection!
-  todoLinearIssue(filters: TodoLinearIssueFilterInput, having: TodoLinearIssueHavingInput, orderBy: TodoLinearIssueOrderInput, pagination: PaginationInput): TodoLinearIssueConnection!
-  syncState(filters: SyncStateFilterInput, having: SyncStateHavingInput, orderBy: SyncStateOrderInput, pagination: PaginationInput): SyncStateConnection!
-  dailyReview(date: String!): DailyReview!
-  clock: Clock!
-  _sea_orm_entity_metadata(table_name: String!): Table!
 }
 
 type SyncState {
@@ -734,3 +702,40 @@ type TodoTagEdge {
   node: TodoTag!
 }
 
+type Query {
+  todo(filters: TodoFilterInput, having: TodoHavingInput, orderBy: TodoOrderInput, pagination: PaginationInput): TodoConnection!
+  tag(filters: TagFilterInput, having: TagHavingInput, orderBy: TagOrderInput, pagination: PaginationInput): TagConnection!
+  todoTag(filters: TodoTagFilterInput, having: TodoTagHavingInput, orderBy: TodoTagOrderInput, pagination: PaginationInput): TodoTagConnection!
+  todoDayPlan(filters: TodoDayPlanFilterInput, having: TodoDayPlanHavingInput, orderBy: TodoDayPlanOrderInput, pagination: PaginationInput): TodoDayPlanConnection!
+  todoEvent(filters: TodoEventFilterInput, having: TodoEventHavingInput, orderBy: TodoEventOrderInput, pagination: PaginationInput): TodoEventConnection!
+  pullRequest(filters: PullRequestFilterInput, having: PullRequestHavingInput, orderBy: PullRequestOrderInput, pagination: PaginationInput): PullRequestConnection!
+  todoPullRequest(filters: TodoPullRequestFilterInput, having: TodoPullRequestHavingInput, orderBy: TodoPullRequestOrderInput, pagination: PaginationInput): TodoPullRequestConnection!
+  linearIssue(filters: LinearIssueFilterInput, having: LinearIssueHavingInput, orderBy: LinearIssueOrderInput, pagination: PaginationInput): LinearIssueConnection!
+  todoLinearIssue(filters: TodoLinearIssueFilterInput, having: TodoLinearIssueHavingInput, orderBy: TodoLinearIssueOrderInput, pagination: PaginationInput): TodoLinearIssueConnection!
+  syncState(filters: SyncStateFilterInput, having: SyncStateHavingInput, orderBy: SyncStateOrderInput, pagination: PaginationInput): SyncStateConnection!
+  dailyReview(date: String!): DailyReview!
+  clock: Clock!
+  _sea_orm_entity_metadata(table_name: String!): Table!
+}
+
+type Mutation {
+  _ping: String
+  createTodo(title: String!, description: String): Todo!
+  updateTodo(id: Int!, title: String, description: String): Todo!
+  setTodoStatus(id: Int!, status: TodoStatusEnum!, blockedReason: String): Todo!
+  planForToday(todoId: Int!): TodoDayPlan!
+  unplanForToday(todoId: Int!): Boolean!
+  reorderDayPlan(date: String!, todoIds: [Int!]!): [TodoDayPlan!]!
+  carryOverUnfinished(from: String!, to: String!): [TodoDayPlan!]!
+  addTag(todoId: Int!, slug: String!): Todo!
+  removeTag(todoId: Int!, slug: String!): Todo!
+  todoFromPullRequest(pullRequestId: Int!, planToday: Boolean!): Todo!
+  linkPullRequest(todoId: Int!, pullRequestId: Int!, relation: LinkRelationEnum!): Todo!
+  dismissPullRequest(id: Int!): PullRequest!
+  todoFromLinearIssue(linearIssueId: Int!, planToday: Boolean!): Todo!
+  linkLinearIssue(todoId: Int!, linearIssueId: Int!): Todo!
+  unlinkPullRequest(todoId: Int!, pullRequestId: Int!): Todo!
+  unlinkLinearIssue(todoId: Int!, linearIssueId: Int!): Todo!
+  syncLinear: SyncState!
+  syncGithub: SyncState!
+}
