@@ -112,6 +112,10 @@ const GLOBAL_KEYS: &[KeybindRow] = &[
         desc: "command palette",
     },
     KeybindRow {
+        key: "C-p/C-k",
+        desc: "command palette",
+    },
+    KeybindRow {
         key: "/",
         desc: "filter list",
     },

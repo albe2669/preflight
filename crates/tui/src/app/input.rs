@@ -1,6 +1,6 @@
 //! Centralized key dispatch.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::edit;
 use crate::app::{App, Mode, SidebarField};
@@ -24,6 +24,26 @@ impl App {
                 return false;
             }
             KeyCode::Char(':') if self.mode == Mode::Navigate => {
+                self.mode = Mode::Command {
+                    input: String::new(),
+                    selection: 0,
+                    caret: 0,
+                };
+                return false;
+            }
+            KeyCode::Char('p')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && self.mode == Mode::Navigate =>
+            {
+                self.mode = Mode::Command {
+                    input: String::new(),
+                    selection: 0,
+                    caret: 0,
+                };
+                return false;
+            }
+            KeyCode::Char('k')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && self.mode == Mode::Navigate =>
+            {
                 self.mode = Mode::Command {
                     input: String::new(),
                     selection: 0,
@@ -848,5 +868,37 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(app.mode, Mode::Navigate);
         assert_eq!(app.filter, "");
+    }
+
+    #[test]
+    fn test_ctrl_p_enters_command_mode() {
+        let mut app = App::default();
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        assert!(matches!(app.mode, Mode::Command { .. }));
+    }
+
+    #[test]
+    fn test_ctrl_k_enters_command_mode() {
+        let mut app = App::default();
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+        assert!(matches!(app.mode, Mode::Command { .. }));
+    }
+
+    #[test]
+    fn test_filter_single_result_still_matchable() {
+        let app = App::default();
+        let filtered = filter_commands(&app, "backlog");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].label, "backlog");
+    }
+
+    #[test]
+    fn test_filter_bac_matches_backlog() {
+        let app = App::default();
+        let filtered = filter_commands(&app, "bac");
+        assert!(
+            filtered.iter().any(|c| c.label == "backlog"),
+            "partial substring 'bac' must match 'backlog'"
+        );
     }
 }

@@ -412,7 +412,8 @@ pub(crate) fn render_command_palette(f: &mut Frame, app: &App, area: ratatui::la
 
     let filtered = crate::app::input::filter_commands(app, &input);
     let width = 50u16.min(area.width);
-    let height = (filtered.len() as u16 + 2).min(10);
+    let visible = 8u16;
+    let height = (filtered.len() as u16 + 3).min(visible + 3);
     let x = area.x + (area.width - width) / 2;
     let y = area.y + (area.height - height) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -441,11 +442,17 @@ pub(crate) fn render_command_palette(f: &mut Frame, app: &App, area: ratatui::la
     );
 
     if !filtered.is_empty() {
+        let start = selection
+            .saturating_sub(visible as usize - 1)
+            .min(filtered.len().saturating_sub(visible as usize));
         let lines: Vec<ListItem> = filtered
             .iter()
+            .skip(start)
+            .take(visible as usize)
             .enumerate()
             .map(|(i, cmd)| {
-                let style = if i == selection {
+                let abs = start + i;
+                let style = if abs == selection {
                     Style::default()
                         .bg(Palette::ROW_HIGHLIGHT)
                         .add_modifier(Modifier::BOLD)
@@ -456,15 +463,13 @@ pub(crate) fn render_command_palette(f: &mut Frame, app: &App, area: ratatui::la
             })
             .collect();
         let list = List::new(lines);
-        f.render_widget(
-            list,
-            Rect::new(
-                inner.x,
-                inner.y + 1,
-                inner.width,
-                inner.height.saturating_sub(1),
-            ),
+        let list_area = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
         );
+        f.render_widget(list, list_area);
     }
 }
 
@@ -499,5 +504,31 @@ mod tests {
     fn test_status_by_index_out_of_range() {
         assert!(status_by_index(5).is_none());
         assert!(status_by_index(100).is_none());
+    }
+
+    #[test]
+    fn test_command_palette_renders_single_result() {
+        use crate::app::{App, Mode};
+        use crate::test_support::buffer_text;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let mut app = App {
+            mode: Mode::Command {
+                input: "backlog".into(),
+                selection: 0,
+                caret: 7,
+            },
+            ..Default::default()
+        };
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| render_command_palette(f, &app, f.area()))
+            .unwrap();
+        let text = buffer_text(terminal.backend().buffer());
+        assert!(
+            text.contains("backlog"),
+            "single filtered result must be visible in the palette:\n{text}"
+        );
     }
 }
