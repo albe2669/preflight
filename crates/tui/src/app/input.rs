@@ -333,39 +333,31 @@ const COMMANDS: &[Command] = &[
     Command {
         label: "today",
         action: |app| {
-            app.view = crate::app::View::Today;
-            app.cursor = 0;
-            app.clamp_cursor_to_active();
+            app.switch_view(crate::app::View::Today);
         },
     },
     Command {
         label: "backlog",
         action: |app| {
-            app.view = crate::app::View::Backlog;
-            app.cursor = 0;
-            app.clamp_cursor_to_active();
+            app.switch_view(crate::app::View::Backlog);
         },
     },
     Command {
         label: "inbox",
         action: |app| {
-            app.view = crate::app::View::Inbox;
-            app.cursor = 0;
+            app.switch_view(crate::app::View::Inbox);
         },
     },
     Command {
         label: "review",
         action: |app| {
-            app.view = crate::app::View::Review;
-            app.cursor = 0;
-            app.spawn_fetch_review();
+            app.switch_view(crate::app::View::Review);
         },
     },
     Command {
         label: "sync",
         action: |app| {
-            app.view = crate::app::View::Sync;
-            app.cursor = 0;
+            app.switch_view(crate::app::View::Sync);
         },
     },
     Command {

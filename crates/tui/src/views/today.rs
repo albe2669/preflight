@@ -241,9 +241,8 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             app.clamp_cursor_to_active();
         }
         KeyCode::Char('R') => {
-            app.view = View::Review;
             app.review_date = app.logical_date - chrono::Duration::days(1);
-            app.spawn_fetch_review();
+            app.switch_view(View::Review);
         }
         _ => {}
     }

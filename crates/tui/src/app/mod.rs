@@ -19,8 +19,7 @@ use crate::gql::{
 };
 
 /// Messages from background async tasks back to the main loop.
-/// The `gen` fields carry a generation tag; stale-checking is wired in Step 7.
-#[allow(dead_code)]
+/// The `gen` fields carry a generation tag; stale results are dropped.
 pub(crate) enum AppMsg {
     FetchAll {
         r#gen: u64,
@@ -289,20 +288,29 @@ impl App {
 
     pub(crate) fn handle_msg(&mut self, msg: AppMsg) {
         match msg {
-            AppMsg::FetchAll { r#gen: _, data } => {
+            AppMsg::FetchAll { r#gen, data } => {
+                if r#gen != self.generation {
+                    return;
+                }
                 self.data = AppData::from_fetch_all(data);
                 self.clamp_cursor_to_active();
             }
-            AppMsg::DailyReview { r#gen: _, review } => {
+            AppMsg::DailyReview { r#gen, review } => {
+                if r#gen != self.generation {
+                    return;
+                }
                 self.review = Some(review);
             }
             AppMsg::DetailData {
-                r#gen: _,
+                r#gen,
                 id,
                 events,
                 prs,
                 linears,
             } => {
+                if r#gen != self.generation {
+                    return;
+                }
                 self.detail = Some(DetailData {
                     tags: Vec::new(),
                     events,
