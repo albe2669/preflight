@@ -7,12 +7,11 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
-use tokio::sync::mpsc;
 
 use crate::app::App;
-use crate::frame;
 use crate::gql;
 use crate::theme::{Glyph, Palette};
+use crate::widgets;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let review = match &app.review {
@@ -85,7 +84,7 @@ fn list_panel<'a>(title: &str, todos: &[gql::Todo], _is_touched: bool) -> List<'
         Style::default().fg(Palette::DIM),
     ))));
     for todo in todos {
-        let (g, c) = frame::status_glyph(&todo.status);
+        let (g, c) = widgets::status_glyph(&todo.status);
         let title_style = match todo.status.as_str() {
             "started" => Style::default()
                 .fg(Palette::TEXT)
@@ -106,29 +105,22 @@ fn list_panel<'a>(title: &str, todos: &[gql::Todo], _is_touched: bool) -> List<'
     List::new(items).style(Style::default().bg(Palette::BG).fg(Palette::TEXT))
 }
 
-pub(crate) async fn handle_navigate(
-    app: &mut App,
-    key: KeyCode,
-    client: &gql::Client,
-    tx: &mpsc::Sender<crate::AppMsg>,
-) -> anyhow::Result<bool> {
+pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('h') | KeyCode::Left => {
             app.review_date -= chrono::Duration::days(1);
-            super::fetch_review(app, client, tx);
+            app.spawn_fetch_review();
         }
         KeyCode::Char('l') | KeyCode::Right => {
             app.review_date += chrono::Duration::days(1);
-            super::fetch_review(app, client, tx);
+            app.spawn_fetch_review();
         }
         KeyCode::Char('g') => {
-            // Go to today's review.
             app.review_date = app.logical_date;
-            super::fetch_review(app, client, tx);
+            app.spawn_fetch_review();
         }
         _ => {}
     }
-    Ok(false)
 }
 
 #[cfg(test)]

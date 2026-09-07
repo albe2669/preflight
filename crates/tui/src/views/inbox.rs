@@ -7,12 +7,10 @@ use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table, TableState};
-use tokio::sync::mpsc;
 
 use crate::app::{App, Mode, ToastKind};
-use crate::frame;
-use crate::gql;
 use crate::theme::{Glyph, Palette};
+use crate::widgets;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let prs = app.inbox_prs();
@@ -162,7 +160,7 @@ fn sub_header_row(label: &str) -> Row<'static> {
 
 /// Build the status cell for a PR: state glyph plus extra review icons.
 fn pr_status_spans(pr: &crate::gql::PullRequest) -> Vec<Span<'static>> {
-    let (g, c) = frame::pr_state_glyph(&pr.state);
+    let (g, c) = widgets::pr_state_glyph(&pr.state);
     let mut spans = vec![Span::styled(g.to_string(), Style::default().fg(c))];
     if pr.changes_requested {
         spans.push(Span::styled("!", Style::default().fg(Palette::BLOCKED)));
@@ -222,7 +220,7 @@ fn pr_row(pr: &crate::gql::PullRequest, is_cursor: bool) -> Row<'static> {
 
 /// A Linear row: status icon, identifier, assignee, title.
 fn linear_row(li: &crate::gql::LinearIssue, is_cursor: bool) -> Row<'static> {
-    let (g, c) = frame::linear_state_glyph(&li.state_type);
+    let (g, c) = widgets::linear_state_glyph(&li.state_type);
     let mut status = vec![Span::styled(g.to_string(), Style::default().fg(c))];
     if li.assigned_to_me {
         status.push(Span::styled(
@@ -267,12 +265,7 @@ fn linear_row(li: &crate::gql::LinearIssue, is_cursor: bool) -> Row<'static> {
     }
 }
 
-pub(crate) async fn handle_navigate(
-    app: &mut App,
-    key: KeyCode,
-    client: &gql::Client,
-    tx: &mpsc::Sender<crate::AppMsg>,
-) -> anyhow::Result<bool> {
+pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
     let total = app.inbox_prs().len() + app.inbox_linears().len();
     match key {
         KeyCode::Char('j') | KeyCode::Down if app.cursor + 1 < total => {
@@ -282,99 +275,35 @@ pub(crate) async fn handle_navigate(
             app.cursor -= 1;
         }
         KeyCode::Char('C') => {
-            // Convert selected inbox row to todo, plan today.
             let prs = app.inbox_prs();
             let linears = app.inbox_linears();
             if app.cursor < prs.len() {
-                let id = prs[app.cursor].id;
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    match c.todo_from_pr(id, true).await {
-                        Ok(_) => {
-                            let _ = t
-                                .send(crate::AppMsg::Toast(
-                                    ToastKind::Success,
-                                    "converted to todo".into(),
-                                ))
-                                .await;
-                            let _ = t.send(crate::AppMsg::Refresh).await;
-                        }
-                        Err(e) => {
-                            let _ = t
-                                .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
-                                .await;
-                        }
-                    }
-                });
+                app.spawn_todo_from_pr(prs[app.cursor].id, true);
             } else {
                 let li_idx = app.cursor - prs.len();
                 if let Some(li) = linears.get(li_idx) {
-                    let id = li.id;
-                    let c = client.clone();
-                    let t = tx.clone();
-                    tokio::spawn(async move {
-                        match c.todo_from_linear(id, true).await {
-                            Ok(_) => {
-                                let _ = t
-                                    .send(crate::AppMsg::Toast(
-                                        ToastKind::Success,
-                                        "converted to todo".into(),
-                                    ))
-                                    .await;
-                                let _ = t.send(crate::AppMsg::Refresh).await;
-                            }
-                            Err(e) => {
-                                let _ = t
-                                    .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
-                                    .await;
-                            }
-                        }
-                    });
+                    app.spawn_todo_from_linear(li.id, true);
                 }
             }
         }
         KeyCode::Char('d') => {
-            // Dismiss PR.
             let prs = app.inbox_prs();
             if app.cursor < prs.len() {
-                let id = prs[app.cursor].id;
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.dismiss_pr(id).await.is_ok() {
-                        let _ = t
-                            .send(crate::AppMsg::Toast(ToastKind::Success, "dismissed".into()))
-                            .await;
-                        let _ = t.send(crate::AppMsg::Refresh).await;
-                    }
-                });
+                app.spawn_dismiss_pr(prs[app.cursor].id);
             }
         }
         KeyCode::Char('D') => {
             app.show_dismissed = !app.show_dismissed;
         }
         KeyCode::Char('s') => {
-            // Sync the group of the selected row.
             let prs = app.inbox_prs();
-            let c = client.clone();
-            let t = tx.clone();
             if app.cursor < prs.len() {
-                tokio::spawn(async move {
-                    if c.sync_github().await.is_ok() {
-                        let _ = t.send(crate::AppMsg::Refresh).await;
-                    }
-                });
+                app.spawn_sync_github();
             } else {
-                tokio::spawn(async move {
-                    if c.sync_linear().await.is_ok() {
-                        let _ = t.send(crate::AppMsg::Refresh).await;
-                    }
-                });
+                app.spawn_sync_linear();
             }
         }
         KeyCode::Char('o') => {
-            // Open URL — print to status bar (no browser open in TUI).
             let prs = app.inbox_prs();
             let linears = app.inbox_linears();
             if app.cursor < prs.len() {
@@ -387,7 +316,6 @@ pub(crate) async fn handle_navigate(
             }
         }
         KeyCode::Char('L') => {
-            // Link the selected row to an existing todo.
             let prs = app.inbox_prs();
             let linears = app.inbox_linears();
             let mode = if app.cursor < prs.len() {
@@ -410,7 +338,6 @@ pub(crate) async fn handle_navigate(
         }
         _ => {}
     }
-    Ok(false)
 }
 
 #[cfg(test)]
@@ -550,29 +477,20 @@ mod render_tests {
 
 #[cfg(test)]
 mod navigate_tests {
-    use ratatui::crossterm::event::KeyCode;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tokio::sync::mpsc;
 
     use crate::app::tests::{make_linear, make_pr, make_todo};
     use crate::app::{App, Mode, ToastKind};
     use crate::gql;
 
-    fn test_client() -> (gql::Client, mpsc::Sender<crate::AppMsg>) {
-        let client = gql::Client::new("http://127.0.0.1:0");
-        let (tx, _rx) = mpsc::channel::<crate::AppMsg>(32);
-        (client, tx)
-    }
-
-    #[tokio::test]
-    async fn test_l_on_pr_row_opens_link_todo_mode_with_pr_id() {
-        let (client, tx) = test_client();
+    #[test]
+    fn test_l_on_pr_row_opens_link_todo_mode_with_pr_id() {
         let mut app = App::default();
         app.data.pulls = vec![make_pr(5, None)];
         app.cursor = 0;
 
-        super::handle_navigate(&mut app, KeyCode::Char('L'), &client, &tx)
-            .await
-            .unwrap();
+        super::handle_navigate(&mut app, KeyCode::Char('L'));
 
         assert_eq!(
             app.mode,
@@ -585,16 +503,13 @@ mod navigate_tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_l_on_linear_row_opens_link_todo_mode_with_issue_id() {
-        let (client, tx) = test_client();
+    #[test]
+    fn test_l_on_linear_row_opens_link_todo_mode_with_issue_id() {
         let mut app = App::default();
         app.data.linears = vec![make_linear(9, None)];
         app.cursor = 0;
 
-        super::handle_navigate(&mut app, KeyCode::Char('L'), &client, &tx)
-            .await
-            .unwrap();
+        super::handle_navigate(&mut app, KeyCode::Char('L'));
 
         assert_eq!(
             app.mode,
@@ -607,17 +522,14 @@ mod navigate_tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_l_out_of_range_does_nothing() {
-        let (client, tx) = test_client();
+    #[test]
+    fn test_l_out_of_range_does_nothing() {
         let mut app = App {
             cursor: 5, // no rows
             ..Default::default()
         };
 
-        super::handle_navigate(&mut app, KeyCode::Char('L'), &client, &tx)
-            .await
-            .unwrap();
+        super::handle_navigate(&mut app, KeyCode::Char('L'));
 
         assert_eq!(app.mode, Mode::Navigate, "L out of range is a no-op");
     }
@@ -705,10 +617,9 @@ mod navigate_tests {
         let mut app = App::default();
         app.data.todos = vec![make_todo(1, "My Task", "todo")];
         enter_link_todo(&mut app);
+        app.init(client, tx);
 
-        crate::views::handle_link_todo(&mut app, KeyCode::Enter, &client, &tx)
-            .await
-            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert_eq!(app.mode, Mode::Navigate, "confirm exits the picker");
         for _ in 0..20 {
@@ -767,10 +678,9 @@ mod navigate_tests {
             linear_issue_id: Some(7),
             selection: 0,
         };
+        app.init(client, tx);
 
-        crate::views::handle_link_todo(&mut app, KeyCode::Enter, &client, &tx)
-            .await
-            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         for _ in 0..20 {
             if !captures.lock().is_empty() {
@@ -801,10 +711,9 @@ mod navigate_tests {
         let mut app = App::default();
         app.data.todos = vec![make_todo(1, "My Task", "todo")];
         enter_link_todo(&mut app);
+        app.init(client, tx);
 
-        crate::views::handle_link_todo(&mut app, KeyCode::Esc, &client, &tx)
-            .await
-            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         assert_eq!(app.mode, Mode::Navigate, "Esc exits the picker");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -859,12 +768,12 @@ mod navigate_tests {
         let client = gql::Client::new(&base_url);
         let (tx, _rx) = mpsc::channel(32);
         let mut app = App::default();
+        app.view = crate::app::View::Inbox;
         app.data.pulls = vec![make_pr(5, None)];
         app.cursor = 0;
+        app.init(client, tx);
 
-        super::handle_navigate(&mut app, KeyCode::Char('C'), &client, &tx)
-            .await
-            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE));
 
         for _ in 0..20 {
             if !captures.lock().is_empty() {
@@ -893,12 +802,12 @@ mod navigate_tests {
         let client = gql::Client::new(&base_url);
         let (tx, _rx) = mpsc::channel(32);
         let mut app = App::default();
+        app.view = crate::app::View::Inbox;
         app.data.linears = vec![make_linear(9, None)];
         app.cursor = 0;
+        app.init(client, tx);
 
-        super::handle_navigate(&mut app, KeyCode::Char('C'), &client, &tx)
-            .await
-            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE));
 
         for _ in 0..20 {
             if !captures.lock().is_empty() {
@@ -931,12 +840,12 @@ mod navigate_tests {
         let client = gql::Client::new(&base_url);
         let (tx, _rx) = mpsc::channel(32);
         let mut app = App::default();
+        app.view = crate::app::View::Inbox;
         app.data.pulls = vec![make_pr(5, None)];
         app.cursor = 0;
+        app.init(client, tx);
 
-        super::handle_navigate(&mut app, KeyCode::Char('d'), &client, &tx)
-            .await
-            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
         for _ in 0..20 {
             if !captures.lock().is_empty() {
@@ -962,12 +871,12 @@ mod navigate_tests {
         let client = gql::Client::new(&base_url);
         let (tx, _rx) = mpsc::channel(32);
         let mut app = App::default();
+        app.view = crate::app::View::Inbox;
         app.data.linears = vec![make_linear(9, None)];
         app.cursor = 0;
+        app.init(client, tx);
 
-        super::handle_navigate(&mut app, KeyCode::Char('d'), &client, &tx)
-            .await
-            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(
@@ -976,16 +885,13 @@ mod navigate_tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_o_on_pr_row_surfaces_url() {
-        let (client, tx) = test_client();
+    #[test]
+    fn test_o_on_pr_row_surfaces_url() {
         let mut app = App::default();
         app.data.pulls = vec![make_pr(5, None)];
         app.cursor = 0;
 
-        super::handle_navigate(&mut app, KeyCode::Char('o'), &client, &tx)
-            .await
-            .unwrap();
+        super::handle_navigate(&mut app, KeyCode::Char('o'));
 
         assert_eq!(app.mode, Mode::Navigate);
         let toast = app.toast.expect("o should raise a toast with the URL");
@@ -997,16 +903,13 @@ mod navigate_tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_o_on_linear_row_surfaces_url() {
-        let (client, tx) = test_client();
+    #[test]
+    fn test_o_on_linear_row_surfaces_url() {
         let mut app = App::default();
         app.data.linears = vec![make_linear(9, None)];
         app.cursor = 0;
 
-        super::handle_navigate(&mut app, KeyCode::Char('o'), &client, &tx)
-            .await
-            .unwrap();
+        super::handle_navigate(&mut app, KeyCode::Char('o'));
 
         let toast = app.toast.expect("o should raise a toast with the URL");
         assert_eq!(toast.kind, ToastKind::Success);

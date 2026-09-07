@@ -7,19 +7,18 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
-use tokio::sync::mpsc;
 
-use crate::app::{App, LinkKind, Mode, SidebarField, ToastKind, matches_filter};
-use crate::frame;
+use crate::app::{App, LinkKind, Mode, SidebarField, matches_filter};
 use crate::gql;
 use crate::theme::Palette;
+use crate::widgets;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let backlog = app.backlog();
 
     // Apply the search filter.
     let filter = match &app.mode {
-        Mode::Search { input } => input.clone(),
+        Mode::Search { input, .. } => input.clone(),
         _ => String::new(),
     };
     let filtered: Vec<&gql::Todo> = backlog
@@ -28,12 +27,12 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         .copied()
         .collect();
 
-    let groups = frame::group_by_status(&filtered, app.show_done);
+    let groups = widgets::group_by_status(&filtered, app.show_done);
 
     // Inline-create prompt (a add). Matches Today's layout so the prompt is
     // visible at the bottom of the backlog list.
     let create_line = match &app.mode {
-        Mode::InlineCreate { input } => Line::from(vec![
+        Mode::InlineCreate { input, .. } => Line::from(vec![
             Span::styled("  add ", Style::default().fg(Palette::ACCENT)),
             Span::styled(
                 if input.is_empty() {
@@ -69,7 +68,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         )));
         let mut items = vec![no_match];
         items.extend(trailing);
-        frame::render_grouped_list(
+        widgets::render_grouped_list(
             f,
             area,
             &[],
@@ -80,7 +79,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    frame::render_grouped_list(
+    widgets::render_grouped_list(
         f,
         area,
         &groups,
@@ -90,12 +89,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     );
 }
 
-pub(crate) async fn handle_navigate(
-    app: &mut App,
-    key: KeyCode,
-    client: &gql::Client,
-    tx: &mpsc::Sender<crate::AppMsg>,
-) -> anyhow::Result<bool> {
+pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('j') | KeyCode::Down => {
             app.cursor = app.cursor.saturating_add(1);
@@ -106,26 +100,13 @@ pub(crate) async fn handle_navigate(
         KeyCode::Char('/') => {
             app.mode = Mode::Search {
                 input: String::new(),
+                caret: 0,
             };
         }
         KeyCode::Char('t') => {
-            // Plan the cursor todo for today.
             let backlog = app.backlog();
             if let Some(todo) = backlog.get(app.cursor) {
-                let id = todo.id;
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.plan_today(id).await.is_ok() {
-                        let _ = t
-                            .send(crate::AppMsg::Toast(
-                                ToastKind::Success,
-                                "planned for today".into(),
-                            ))
-                            .await;
-                        let _ = t.send(crate::AppMsg::Refresh).await;
-                    }
-                });
+                app.spawn_plan_today(todo.id);
             }
         }
         KeyCode::Char('D') => {
@@ -159,6 +140,7 @@ pub(crate) async fn handle_navigate(
                 app.mode = Mode::InlineEdit {
                     id: td.id,
                     input: td.title.clone(),
+                    caret: td.title.len(),
                 };
             }
         }
@@ -183,7 +165,7 @@ pub(crate) async fn handle_navigate(
                     link_search: String::new(),
                     scroll: 0,
                 };
-                super::fetch_detail(app, client, tx, id);
+                app.spawn_fetch_detail(id);
             }
         }
         KeyCode::Char(' ') | KeyCode::Char('s') => {
@@ -199,7 +181,6 @@ pub(crate) async fn handle_navigate(
         }
         _ => {}
     }
-    Ok(false)
 }
 
 #[cfg(test)]
@@ -285,6 +266,7 @@ mod render_tests {
         let mut app = App {
             mode: crate::app::Mode::InlineCreate {
                 input: "new backlog task".to_string(),
+                caret: 16,
             },
             ..Default::default()
         };

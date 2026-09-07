@@ -12,12 +12,11 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
-use tokio::sync::mpsc;
 
 use crate::app::{App, ConfirmAction, LinkKind, Mode, SidebarField, View, matches_filter};
-use crate::frame;
 use crate::gql;
 use crate::theme::Palette;
+use crate::widgets;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let carried_ids: std::collections::HashSet<i32> = app
@@ -32,7 +31,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Apply the search filter to the plan rows.
     let filter = match &app.mode {
-        Mode::Search { input } => input.clone(),
+        Mode::Search { input, .. } => input.clone(),
         _ => String::new(),
     };
     let filtered: Vec<&gql::Todo> = plan
@@ -42,7 +41,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         .collect();
 
     // Group by state using the shared renderer.
-    let groups = frame::group_by_status(&filtered, app.show_done);
+    let groups = widgets::group_by_status(&filtered, app.show_done);
 
     // Trailing items: unplanned section + inline-create prompt.
     let mut trailing: Vec<ListItem> = Vec::new();
@@ -54,7 +53,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         ))));
         for row in &unplanned {
             if let Some(td) = &row.todo {
-                let (sglyph, scolor) = frame::status_glyph(&td.status);
+                let (sglyph, scolor) = widgets::status_glyph(&td.status);
                 trailing.push(ListItem::new(Line::from(vec![
                     Span::raw("   –  "),
                     Span::styled(sglyph.to_string(), Style::default().fg(scolor)),
@@ -73,7 +72,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Inline create prompt.
     let create_line = match &app.mode {
-        Mode::InlineCreate { input } => Line::from(vec![
+        Mode::InlineCreate { input, .. } => Line::from(vec![
             Span::styled("  add ", Style::default().fg(Palette::ACCENT)),
             Span::styled(
                 if input.is_empty() {
@@ -109,7 +108,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         ));
         let mut no_match_items = vec![ListItem::new(no_match)];
         no_match_items.extend(trailing);
-        frame::render_grouped_list(
+        widgets::render_grouped_list(
             f,
             area,
             &[],
@@ -120,7 +119,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    frame::render_grouped_list(
+    widgets::render_grouped_list(
         f,
         area,
         &groups,
@@ -130,12 +129,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     );
 }
 
-pub(crate) async fn handle_navigate(
-    app: &mut App,
-    key: KeyCode,
-    client: &gql::Client,
-    tx: &mpsc::Sender<crate::AppMsg>,
-) -> anyhow::Result<bool> {
+pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
     let plan_count = app.today_plan().len();
     match key {
         KeyCode::Char('j') | KeyCode::Down if app.cursor + 1 < plan_count => {
@@ -172,6 +166,7 @@ pub(crate) async fn handle_navigate(
                 app.mode = Mode::InlineEdit {
                     id: td.id,
                     input: td.title.clone(),
+                    caret: td.title.len(),
                 };
             }
         }
@@ -198,7 +193,7 @@ pub(crate) async fn handle_navigate(
                     link_search: String::new(),
                     scroll: 0,
                 };
-                super::fetch_detail(app, client, tx, id);
+                app.spawn_fetch_detail(id);
             }
         }
         KeyCode::Char('D') => {
@@ -229,10 +224,10 @@ pub(crate) async fn handle_navigate(
         KeyCode::Char('/') => {
             app.mode = Mode::Search {
                 input: String::new(),
+                caret: 0,
             };
         }
         KeyCode::Char('c') => {
-            // Carry over yesterday's unfinished.
             let from = (app.logical_date - chrono::Duration::days(1))
                 .format("%Y-%m-%d")
                 .to_string();
@@ -242,19 +237,16 @@ pub(crate) async fn handle_navigate(
             };
         }
         KeyCode::Char('b') => {
-            // Pick from backlog — switch to Backlog view.
             app.cursor = 0;
             app.clamp_cursor_to_active();
         }
         KeyCode::Char('R') => {
-            // Daily review of yesterday.
             app.view = View::Review;
             app.review_date = app.logical_date - chrono::Duration::days(1);
-            super::fetch_review(app, client, tx);
+            app.spawn_fetch_review();
         }
         _ => {}
     }
-    Ok(false)
 }
 
 #[cfg(test)]

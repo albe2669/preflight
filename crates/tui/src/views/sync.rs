@@ -6,10 +6,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
-use tokio::sync::mpsc;
 
-use crate::app::{App, ToastKind};
-use crate::gql;
+use crate::app::App;
 use crate::theme::{Glyph, Palette};
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
@@ -95,12 +93,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-pub(crate) async fn handle_navigate(
-    app: &mut App,
-    key: KeyCode,
-    client: &gql::Client,
-    tx: &mpsc::Sender<crate::AppMsg>,
-) -> anyhow::Result<bool> {
+pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('j') | KeyCode::Down if app.cursor + 1 < app.data.sync.len() => {
             app.cursor += 1;
@@ -109,49 +102,16 @@ pub(crate) async fn handle_navigate(
             app.cursor -= 1;
         }
         KeyCode::Char('s') => {
-            // Sync the selected source.
             if let Some(s) = app.data.sync.get(app.cursor) {
                 let source = s.source.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    let res = if source == "linear" {
-                        c.sync_linear().await
-                    } else {
-                        c.sync_github().await
-                    };
-                    match res {
-                        Ok(_) => {
-                            let _ = t
-                                .send(crate::AppMsg::Toast(
-                                    ToastKind::Success,
-                                    format!("{} synced", source),
-                                ))
-                                .await;
-                            let _ = t.send(crate::AppMsg::Refresh).await;
-                        }
-                        Err(e) => {
-                            let _ = t
-                                .send(crate::AppMsg::Toast(ToastKind::Error, e.to_string()))
-                                .await;
-                        }
-                    }
-                });
+                app.spawn_sync_source(&source);
             }
         }
         KeyCode::Char('S') => {
-            // Sync all configured sources.
-            let c = client.clone();
-            let t = tx.clone();
-            tokio::spawn(async move {
-                let _ = c.sync_linear().await;
-                let _ = c.sync_github().await;
-                let _ = t.send(crate::AppMsg::Refresh).await;
-            });
+            app.spawn_sync_all();
         }
         _ => {}
     }
-    Ok(false)
 }
 
 #[cfg(test)]

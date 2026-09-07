@@ -5,11 +5,41 @@
 //! it. Mutations update the backend then trigger a refetch so this cache stays
 //! authoritative.
 
+pub mod actions;
+pub mod edit;
+pub mod input;
+pub mod navigation;
+
 use std::collections::HashSet;
+
+use tokio::sync::mpsc;
 
 use crate::gql::{
     DailyReview, PullRequest, SyncState, Tag, Todo, TodoEvent, TodoLinearIssue, TodoPullRequest,
 };
+
+/// Messages from background async tasks back to the main loop.
+/// The `gen` fields carry a generation tag; stale-checking is wired in Step 7.
+#[allow(dead_code)]
+pub(crate) enum AppMsg {
+    FetchAll {
+        r#gen: u64,
+        data: crate::gql::FetchAll,
+    },
+    DailyReview {
+        r#gen: u64,
+        review: DailyReview,
+    },
+    DetailData {
+        r#gen: u64,
+        id: i32,
+        events: Vec<TodoEvent>,
+        prs: Vec<TodoPullRequest>,
+        linears: Vec<TodoLinearIssue>,
+    },
+    Toast(ToastKind, String),
+    Refresh,
+}
 
 /// The five top-level views plus the detail overlay.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -52,13 +82,16 @@ pub enum Mode {
     Navigate,
     InlineCreate {
         input: String,
+        caret: usize,
     },
     InlineEdit {
         id: i32,
         input: String,
+        caret: usize,
     },
     Search {
         input: String,
+        caret: usize,
     },
     Reorder {
         source_id: i32,
@@ -198,6 +231,9 @@ pub struct App {
     pub help_scroll: usize,
     pub detail_loaded_id: Option<i32>,
     pub content_width: u16,
+    pub(crate) client: crate::gql::Client,
+    pub(crate) tx: Option<mpsc::Sender<AppMsg>>,
+    pub(crate) generation: u64,
 }
 
 /// Lazy-loaded data for the detail overlay.
@@ -229,6 +265,45 @@ impl Default for App {
             help_scroll: 0,
             detail_loaded_id: None,
             content_width: 0,
+            client: crate::gql::Client::new("http://127.0.0.1:0"),
+            tx: None,
+            generation: 0,
+        }
+    }
+}
+
+impl App {
+    pub(crate) fn init(&mut self, client: crate::gql::Client, tx: mpsc::Sender<AppMsg>) {
+        self.client = client;
+        self.tx = Some(tx);
+    }
+
+    pub(crate) fn handle_msg(&mut self, msg: AppMsg) {
+        match msg {
+            AppMsg::FetchAll { r#gen: _, data } => {
+                self.data = AppData::from_fetch_all(data);
+                self.clamp_cursor_to_active();
+            }
+            AppMsg::DailyReview { r#gen: _, review } => {
+                self.review = Some(review);
+            }
+            AppMsg::DetailData {
+                r#gen: _,
+                id,
+                events,
+                prs,
+                linears,
+            } => {
+                self.detail = Some(DetailData {
+                    tags: Vec::new(),
+                    events,
+                    prs,
+                    linears,
+                });
+                let _ = id;
+            }
+            AppMsg::Toast(k, m) => self.set_toast(k, m),
+            AppMsg::Refresh => self.spawn_refresh(),
         }
     }
 }
