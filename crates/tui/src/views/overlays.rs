@@ -395,6 +395,79 @@ pub(crate) fn linear_picker_candidates(app: &crate::app::App, search: &str) -> V
     idxs
 }
 
+pub(crate) fn render_command_palette(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use ratatui::layout::Rect;
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Clear, List, ListItem};
+
+    let Mode::Command {
+        input, selection, ..
+    } = &app.mode
+    else {
+        return;
+    };
+    let input = input.clone();
+    let selection = *selection;
+
+    let filtered = crate::app::input::filter_commands(&input);
+    let width = 50u16.min(area.width);
+    let height = (filtered.len() as u16 + 2).min(10);
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y + (area.height - height) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::ACCENT))
+        .title(Span::styled(
+            " Command ",
+            Style::default().fg(Palette::ACCENT),
+        ));
+    f.render_widget(block, popup);
+
+    let inner = Rect::new(
+        x + 1,
+        y + 1,
+        width.saturating_sub(2),
+        height.saturating_sub(2),
+    );
+
+    let input_line = Line::from(format!(":{input}\u{258f}"));
+    f.render_widget(
+        ratatui::widgets::Paragraph::new(input_line),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    if !filtered.is_empty() {
+        let lines: Vec<ListItem> = filtered
+            .iter()
+            .enumerate()
+            .map(|(i, cmd)| {
+                let style = if i == selection {
+                    Style::default()
+                        .bg(Palette::ROW_HIGHLIGHT)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(Line::from(cmd.label).style(style))
+            })
+            .collect();
+        let list = List::new(lines);
+        f.render_widget(
+            list,
+            Rect::new(
+                inner.x,
+                inner.y + 1,
+                inner.width,
+                inner.height.saturating_sub(1),
+            ),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

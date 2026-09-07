@@ -1,4 +1,4 @@
-//! Inline create, inline edit, search, and reorder handlers.
+//! Inline create, inline edit, and reorder handlers.
 //!
 //! These are the lightweight single-line text inputs and the J/K reorder
 //! handler. Text editing uses the shared primitives from `app::edit`.
@@ -106,43 +106,6 @@ pub(crate) fn handle_inline_edit(app: &mut App, key: ratatui::crossterm::event::
             }
             app.spawn_update_todo(id, Some(&title), None);
             app.mode = Mode::Navigate;
-        }
-        _ => {}
-    }
-}
-
-pub(crate) fn handle_search(app: &mut App, key: ratatui::crossterm::event::KeyCode) {
-    use ratatui::crossterm::event::KeyCode::*;
-    match key {
-        Char(c) if c.is_alphanumeric() || c == ' ' || c == '#' || c == '-' || c == '_' => {
-            if let Mode::Search { input, caret } = &mut app.mode {
-                *caret = edit::insert_char(input, *caret, c);
-            }
-        }
-        Backspace => {
-            if let Mode::Search { input, caret } = &mut app.mode {
-                *caret = edit::backspace(input, *caret);
-            }
-        }
-        Left => {
-            if let Mode::Search { input, caret } = &mut app.mode {
-                *caret = edit::move_caret(input, *caret, -1);
-            }
-        }
-        Right => {
-            if let Mode::Search { input, caret } = &mut app.mode {
-                *caret = edit::move_caret(input, *caret, 1);
-            }
-        }
-        Home => {
-            if let Mode::Search { caret, .. } = &mut app.mode {
-                *caret = 0;
-            }
-        }
-        End => {
-            if let Mode::Search { input, caret } = &mut app.mode {
-                *caret = input.len();
-            }
         }
         _ => {}
     }

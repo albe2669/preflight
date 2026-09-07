@@ -89,8 +89,13 @@ pub enum Mode {
         input: String,
         caret: usize,
     },
-    Search {
+    Filter {
         input: String,
+        caret: usize,
+    },
+    Command {
+        input: String,
+        selection: usize,
         caret: usize,
     },
     Reorder {
@@ -234,6 +239,8 @@ pub struct App {
     pub(crate) client: crate::gql::Client,
     pub(crate) tx: Option<mpsc::Sender<AppMsg>>,
     pub(crate) generation: u64,
+    pub(crate) filter: String,
+    pub(crate) quit_requested: bool,
 }
 
 /// Lazy-loaded data for the detail overlay.
@@ -268,6 +275,8 @@ impl Default for App {
             client: crate::gql::Client::new("http://127.0.0.1:0"),
             tx: None,
             generation: 0,
+            filter: String::new(),
+            quit_requested: false,
         }
     }
 }

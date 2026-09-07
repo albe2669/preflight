@@ -188,7 +188,10 @@ fn status_hints(app: &App) -> String {
     match (&app.view, &app.mode) {
         (_, crate::app::Mode::InlineCreate { .. }) => "enter save · esc cancel · # tag".into(),
         (_, crate::app::Mode::InlineEdit { .. }) => "enter save · esc revert".into(),
-        (_, crate::app::Mode::Search { .. }) => "type to filter · esc clears".into(),
+        (_, crate::app::Mode::Filter { .. }) => "type to filter · esc clears".into(),
+        (_, crate::app::Mode::Command { .. }) => {
+            "type to filter · j/k select · enter run · esc cancel".into()
+        }
         (_, crate::app::Mode::Reorder { .. }) => "J/K move · enter drop · esc abort".into(),
         (_, crate::app::Mode::Confirm { .. }) => "y confirm · n cancel".into(),
         (

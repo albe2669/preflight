@@ -23,12 +23,28 @@ impl App {
                 self.help_scroll = 0;
                 return false;
             }
-            KeyCode::Esc => match self.mode {
+            KeyCode::Char(':') if self.mode == Mode::Navigate => {
+                self.mode = Mode::Command {
+                    input: String::new(),
+                    selection: 0,
+                    caret: 0,
+                };
+                return false;
+            }
+            KeyCode::Esc => match &self.mode {
                 Mode::Navigate => {
                     self.toast = None;
                     return false;
                 }
                 Mode::SidebarEdit { .. } | Mode::SidebarAdd { .. } => {}
+                Mode::Filter { input, .. } => {
+                    if !input.is_empty() {
+                        self.filter = String::new();
+                    }
+                    self.mode = Mode::Navigate;
+                    self.toast = None;
+                    return false;
+                }
                 _ => {
                     self.mode = Mode::Navigate;
                     self.toast = None;
@@ -42,7 +58,7 @@ impl App {
             Mode::Navigate => self.key_navigate(key.code),
             Mode::InlineCreate { .. } => self.key_inline_create(key),
             Mode::InlineEdit { .. } => self.key_inline_edit(key),
-            Mode::Search { .. } => self.key_search(key),
+            Mode::Filter { .. } => self.key_filter(key),
             Mode::Reorder { source_id } => self.key_reorder(key.code, source_id),
             Mode::Confirm { action } => self.key_confirm(key.code, &action),
             Mode::Help { filter } => self.key_help(key.code, &filter),
@@ -54,6 +70,10 @@ impl App {
             Mode::LinkTodo { .. } => self.key_link_todo(key.code),
             Mode::SidebarEdit { .. } => self.key_sidebar_edit(key),
             Mode::SidebarAdd { .. } => self.key_sidebar_add(key),
+            Mode::Command { .. } => self.key_command(key),
+        }
+        if self.quit_requested {
+            return true;
         }
         false
     }
@@ -86,13 +106,53 @@ impl App {
         crate::views::inline::handle_inline_edit(self, key.code);
     }
 
-    fn key_search(&mut self, key: KeyEvent) {
-        if let Mode::Search { input, caret } = &mut self.mode {
+    fn key_filter(&mut self, key: KeyEvent) {
+        if let Mode::Filter { input, caret } = &mut self.mode {
             if edit::edit_chord(key.code, key.modifiers, input, caret) {
                 return;
             }
         }
-        crate::views::inline::handle_search(self, key.code);
+        use crossterm::event::KeyCode::*;
+        match key.code {
+            Char(c) if c.is_alphanumeric() || c == ' ' || c == '#' || c == '-' || c == '_' => {
+                if let Mode::Filter { input, caret } = &mut self.mode {
+                    *caret = edit::insert_char(input, *caret, c);
+                }
+            }
+            Backspace => {
+                if let Mode::Filter { input, caret } = &mut self.mode {
+                    *caret = edit::backspace(input, *caret);
+                }
+            }
+            Left => {
+                if let Mode::Filter { input, caret } = &mut self.mode {
+                    *caret = edit::move_caret(input, *caret, -1);
+                }
+            }
+            Right => {
+                if let Mode::Filter { input, caret } = &mut self.mode {
+                    *caret = edit::move_caret(input, *caret, 1);
+                }
+            }
+            Home => {
+                if let Mode::Filter { caret, .. } = &mut self.mode {
+                    *caret = 0;
+                }
+            }
+            End => {
+                if let Mode::Filter { input, caret } = &mut self.mode {
+                    *caret = input.len();
+                }
+            }
+            Enter => {
+                if let Mode::Filter { input, .. } = &self.mode {
+                    self.filter = input.clone();
+                }
+                self.mode = Mode::Navigate;
+            }
+
+            _ => {}
+        }
     }
 
     fn key_reorder(&mut self, key: KeyCode, _source_id: i32) {
@@ -154,6 +214,72 @@ impl App {
         }
         crate::views::sidebar::handle_sidebar_add(self, key.code);
     }
+
+    fn key_command(&mut self, key: KeyEvent) {
+        let (input, selection, caret) = match &mut self.mode {
+            Mode::Command {
+                input,
+                selection,
+                caret,
+            } => (input, selection, caret),
+            _ => unreachable!(),
+        };
+        if edit::edit_chord(key.code, key.modifiers, input, caret) {
+            return;
+        }
+        use crossterm::event::KeyCode::*;
+        match key.code {
+            Char('j') | Down => {
+                let filtered = filter_commands(input);
+                if !filtered.is_empty() {
+                    *selection = (*selection + 1) % filtered.len();
+                }
+            }
+            Char('k') | Up => {
+                let filtered = filter_commands(input);
+                if !filtered.is_empty() {
+                    *selection = selection.checked_sub(1).unwrap_or(filtered.len() - 1);
+                }
+            }
+            Tab => {
+                let filtered = filter_commands(input);
+                if !filtered.is_empty() {
+                    *selection = (*selection + 1) % filtered.len();
+                }
+            }
+            Enter => {
+                let filtered = filter_commands(input);
+                if let Some(cmd) = filtered.get(*selection) {
+                    let action = cmd.action;
+                    self.mode = Mode::Navigate;
+                    action(self);
+                } else {
+                    self.mode = Mode::Navigate;
+                }
+            }
+            Char(c) if c.is_alphanumeric() || c == ' ' => {
+                *caret = edit::insert_char(input, *caret, c);
+                *selection = 0;
+            }
+            Backspace => {
+                *caret = edit::backspace(input, *caret);
+                *selection = 0;
+            }
+            Left => {
+                *caret = edit::move_caret(input, *caret, -1);
+            }
+            Right => {
+                *caret = edit::move_caret(input, *caret, 1);
+            }
+            Home => {
+                *caret = 0;
+            }
+            End => {
+                *caret = input.len();
+            }
+            _ => {}
+        }
+    }
 }
 
 fn sidebar_edit_active_buf_caret_mut(app: &mut App) -> (&mut String, &mut usize) {
@@ -195,5 +321,243 @@ fn sidebar_add_active_buf_caret_mut(app: &mut App) -> (&mut String, &mut usize) 
             SidebarField::Links => unreachable!(),
         },
         _ => unreachable!(),
+    }
+}
+
+pub(crate) struct Command {
+    pub(crate) label: &'static str,
+    action: fn(&mut App),
+}
+
+const COMMANDS: &[Command] = &[
+    Command {
+        label: "today",
+        action: |app| {
+            app.view = crate::app::View::Today;
+            app.cursor = 0;
+            app.clamp_cursor_to_active();
+        },
+    },
+    Command {
+        label: "backlog",
+        action: |app| {
+            app.view = crate::app::View::Backlog;
+            app.cursor = 0;
+            app.clamp_cursor_to_active();
+        },
+    },
+    Command {
+        label: "inbox",
+        action: |app| {
+            app.view = crate::app::View::Inbox;
+            app.cursor = 0;
+        },
+    },
+    Command {
+        label: "review",
+        action: |app| {
+            app.view = crate::app::View::Review;
+            app.cursor = 0;
+            app.spawn_fetch_review();
+        },
+    },
+    Command {
+        label: "sync",
+        action: |app| {
+            app.view = crate::app::View::Sync;
+            app.cursor = 0;
+        },
+    },
+    Command {
+        label: "sync github",
+        action: |app| {
+            app.spawn_sync_github();
+        },
+    },
+    Command {
+        label: "sync linear",
+        action: |app| {
+            app.spawn_sync_linear();
+        },
+    },
+    Command {
+        label: "carry over",
+        action: |app| {
+            let from = (app.logical_date - chrono::Duration::days(1))
+                .format("%Y-%m-%d")
+                .to_string();
+            let to = app.logical_date.format("%Y-%m-%d").to_string();
+            app.mode = Mode::Confirm {
+                action: crate::app::ConfirmAction::CarryOver { from, to },
+            };
+        },
+    },
+    Command {
+        label: "refresh",
+        action: |app| {
+            app.spawn_refresh();
+        },
+    },
+    Command {
+        label: "toggle done",
+        action: |app| {
+            app.show_done = !app.show_done;
+        },
+    },
+    Command {
+        label: "toggle dismissed",
+        action: |app| {
+            app.show_dismissed = !app.show_dismissed;
+        },
+    },
+    Command {
+        label: "help",
+        action: |app| {
+            app.mode = Mode::Help {
+                filter: String::new(),
+            };
+            app.help_scroll = 0;
+        },
+    },
+    Command {
+        label: "quit",
+        action: |app| {
+            app.quit_requested = true;
+        },
+    },
+];
+
+pub(crate) fn filter_commands(input: &str) -> Vec<&'static Command> {
+    if input.is_empty() {
+        return COMMANDS.iter().collect();
+    }
+    let needle = input.to_lowercase();
+    COMMANDS
+        .iter()
+        .filter(|c| c.label.to_lowercase().contains(&needle))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{App, Mode, View};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn test_colon_enters_command_mode() {
+        let mut app = App::default();
+        app.handle_key(KeyEvent::new(KeyCode::Char(':'), KeyModifiers::NONE));
+        assert!(matches!(app.mode, Mode::Command { .. }));
+    }
+
+    #[test]
+    fn test_command_palette_filters_by_substring() {
+        let filtered = filter_commands("sync");
+        assert!(filtered.iter().any(|c| c.label == "sync github"));
+        assert!(filtered.iter().any(|c| c.label == "sync linear"));
+    }
+
+    #[test]
+    fn test_command_enter_executes_selection() {
+        let mut app = App {
+            mode: Mode::Command {
+                input: "today".into(),
+                selection: 0,
+                caret: 5,
+            },
+            ..Default::default()
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.view, View::Today);
+        assert_eq!(app.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn test_command_esc_returns_to_navigate() {
+        let mut app = App {
+            mode: Mode::Command {
+                input: "sync".into(),
+                selection: 0,
+                caret: 4,
+            },
+            ..Default::default()
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn test_command_j_moves_selection_down() {
+        let mut app = App {
+            mode: Mode::Command {
+                input: String::new(),
+                selection: 0,
+                caret: 0,
+            },
+            ..Default::default()
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        if let Mode::Command { selection, .. } = &app.mode {
+            assert!(*selection > 0);
+        } else {
+            panic!("expected Command mode");
+        }
+    }
+
+    #[test]
+    fn test_command_k_moves_selection_up() {
+        let mut app = App {
+            mode: Mode::Command {
+                input: String::new(),
+                selection: 1,
+                caret: 0,
+            },
+            ..Default::default()
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        if let Mode::Command { selection, .. } = &app.mode {
+            assert_eq!(*selection, 0);
+        } else {
+            panic!("expected Command mode");
+        }
+    }
+
+    #[test]
+    fn test_slash_enters_filter_mode() {
+        let mut app = App {
+            view: View::Today,
+            ..Default::default()
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        assert!(matches!(app.mode, Mode::Filter { .. }));
+    }
+
+    #[test]
+    fn test_filter_enter_commits_filter() {
+        let mut app = App {
+            mode: Mode::Filter {
+                input: "hello".into(),
+                caret: 5,
+            },
+            ..Default::default()
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Navigate);
+        assert_eq!(app.filter, "hello");
+    }
+
+    #[test]
+    fn test_filter_esc_clears_filter() {
+        let mut app = App {
+            mode: Mode::Filter {
+                input: "hello".into(),
+                caret: 5,
+            },
+            ..Default::default()
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Navigate);
+        assert_eq!(app.filter, "");
     }
 }

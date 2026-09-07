@@ -51,6 +51,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if let Mode::Confirm { .. } = &app.mode {
         render_confirm(f, app, area);
     }
+    if let Mode::Command { .. } = &app.mode {
+        overlays::render_command_palette(f, app, area);
+    }
     render_toast(f, app, area);
 }
 
@@ -105,6 +108,14 @@ const GLOBAL_KEYS: &[KeybindRow] = &[
         desc: "this help",
     },
     KeybindRow {
+        key: ":",
+        desc: "command palette",
+    },
+    KeybindRow {
+        key: "/",
+        desc: "filter list",
+    },
+    KeybindRow {
         key: "Esc",
         desc: "close overlay / cancel action",
     },
@@ -151,10 +162,6 @@ const TODAY_KEYS: &[KeybindRow] = &[
         key: "R",
         desc: "review yesterday",
     },
-    KeybindRow {
-        key: "/",
-        desc: "search / filter",
-    },
 ];
 
 const BACKLOG_KEYS: &[KeybindRow] = &[
@@ -165,10 +172,6 @@ const BACKLOG_KEYS: &[KeybindRow] = &[
     KeybindRow {
         key: "SPC/s",
         desc: "status popup",
-    },
-    KeybindRow {
-        key: "/",
-        desc: "search / filter",
     },
     KeybindRow {
         key: "t",

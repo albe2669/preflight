@@ -31,8 +31,8 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Apply the search filter to the plan rows.
     let filter = match &app.mode {
-        Mode::Search { input, .. } => input.clone(),
-        _ => String::new(),
+        Mode::Filter { input, .. } => input.clone(),
+        _ => app.filter.clone(),
     };
     let filtered: Vec<&gql::Todo> = plan
         .iter()
@@ -222,7 +222,7 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             }
         }
         KeyCode::Char('/') => {
-            app.mode = Mode::Search {
+            app.mode = Mode::Filter {
                 input: String::new(),
                 caret: 0,
             };
