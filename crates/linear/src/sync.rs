@@ -16,6 +16,8 @@ use crate::error::{LinearError, Result};
 pub use crate::filters::LinearFilter;
 use remote_sync::sync::SyncLoop;
 
+const WATERMARK_MARGIN: chrono::Duration = chrono::Duration::minutes(5);
+
 #[async_trait]
 pub trait LinearSync: Send + Sync {
     async fn pull(&self) -> Result<sync_state::Model>;
@@ -69,7 +71,14 @@ impl LinearSync for LinearSyncImpl {
             )
             .await?;
         } else {
-            let filter = crate::filters::compile_linear_filter(&self.opts.filters);
+            let raw_cursor = crate::cursor::get(&db, "linear").await?;
+            let since = raw_cursor
+                .as_deref()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc));
+            let effective_since = since.map(|ts| ts - WATERMARK_MARGIN);
+            let sync_start = chrono::Utc::now();
+            let filter = crate::filters::compile_linear_filter(&self.opts.filters, effective_since);
             tracing::debug!(filter = %filter, "compiled linear sync filter");
 
             // If filter is null (no filters configured), skip fetch
@@ -99,7 +108,8 @@ impl LinearSync for LinearSyncImpl {
                             cursor = sync_result.end_cursor.as_deref(),
                             "sync loop end"
                         );
-                        cursor::put(&db, "linear", None, "ok", None).await?;
+                        cursor::put(&db, "linear", Some(sync_start.to_rfc3339()), "ok", None)
+                            .await?;
                     }
                     Err(remote_err) => {
                         let err: LinearError = remote_err.into();
@@ -109,7 +119,7 @@ impl LinearSync for LinearSyncImpl {
                                 error = %err,
                                 "sync loop end"
                             );
-                            cursor::put(&db, "linear", None, "error", None).await?;
+                            cursor::put(&db, "linear", raw_cursor.clone(), "error", None).await?;
                             return Err(LinearError::PartialResults);
                         }
                         tracing::error!(
@@ -117,7 +127,14 @@ impl LinearSync for LinearSyncImpl {
                             error = %err,
                             "sync loop end"
                         );
-                        cursor::put(&db, "linear", None, "error", Some(err.to_string())).await?;
+                        cursor::put(
+                            &db,
+                            "linear",
+                            raw_cursor.clone(),
+                            "error",
+                            Some(err.to_string()),
+                        )
+                        .await?;
                         return Err(err);
                     }
                 }
@@ -483,6 +500,82 @@ mod tests {
         assert!(
             log_text.contains("sync loop end"),
             "expected sync loop end event, got: {log_text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pull_stores_watermark_on_success() {
+        let db = setup_db().await;
+        let fake = Arc::new(FakeClient::new(vec![
+            Ok(make_page("issue-2", None, false)),
+            Ok(make_page("issue-1", Some("X"), true)),
+        ]));
+        let svc = build_svc(
+            db.clone(),
+            fake,
+            LinearOptions {
+                token: "fake-token".into(),
+                filters: vec![LinearFilter {
+                    team: Some("ENG".into()),
+                    ..Default::default()
+                }],
+            },
+        );
+
+        let result = svc.pull().await.expect("pull should succeed");
+        assert_eq!(result.last_status, "ok");
+
+        let state = sync_state::Entity::find_by_id("linear")
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("sync_state row");
+        assert!(state.cursor.is_some(), "cursor should be set on success");
+        chrono::DateTime::parse_from_rfc3339(state.cursor.as_deref().unwrap())
+            .expect("cursor should parse as RFC 3339");
+    }
+
+    #[tokio::test]
+    async fn test_pull_preserves_watermark_on_error() {
+        let db = setup_db().await;
+        cursor::put(
+            &db,
+            "linear",
+            Some("2026-09-07T09:37:00+00:00".into()),
+            "ok",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let fake = Arc::new(FakeClient::new(vec![
+            Err(LinearError::Remote("server error".into())),
+            Ok(make_page("issue-1", Some("X"), true)),
+        ]));
+        let svc = build_svc(
+            db.clone(),
+            fake,
+            LinearOptions {
+                token: "fake-token".into(),
+                filters: vec![LinearFilter {
+                    team: Some("ENG".into()),
+                    ..Default::default()
+                }],
+            },
+        );
+
+        let result = svc.pull().await;
+        assert!(matches!(result, Err(LinearError::PartialResults)));
+
+        let state = sync_state::Entity::find_by_id("linear")
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("sync_state row");
+        assert_eq!(
+            state.cursor.as_deref(),
+            Some("2026-09-07T09:37:00+00:00"),
+            "old watermark should be preserved on error"
         );
     }
 }

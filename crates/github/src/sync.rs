@@ -7,7 +7,7 @@ use crate::entity::enums::PullRequestState;
 use crate::entity::pull_request;
 use crate::filters::{apply_draft_policy, compile_github_query};
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, Set,
@@ -17,6 +17,10 @@ use sync_state::entity::sync_state;
 use crate::cursor;
 use crate::error::{GithubError, Result};
 use remote_sync::sync::SyncLoop;
+
+/// Subtract this from the stored watermark before injecting `updated:>`
+/// into the query, so PRs updated near the watermark boundary are not missed.
+const WATERMARK_MARGIN: Duration = Duration::minutes(5);
 
 #[async_trait]
 pub trait GithubSync: Send + Sync {
@@ -75,7 +79,14 @@ impl GithubSync for GithubSyncImpl {
                 .ok_or_else(|| GithubError::NotFound);
         }
 
-        let query = compile_github_query(&self.opts.filters);
+        let raw_cursor = cursor::get(&db, "github").await?;
+        let since = raw_cursor
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+        let effective_since = since.map(|ts| ts - WATERMARK_MARGIN);
+        let sync_start = Utc::now();
+        let query = compile_github_query(&self.opts.filters, effective_since);
         tracing::debug!(query = %query, "compiled github sync query");
 
         // Empty filters → no-op, mark ok
@@ -122,7 +133,7 @@ impl GithubSync for GithubSyncImpl {
                     cursor = sync_result.end_cursor.as_deref(),
                     "sync loop end"
                 );
-                cursor::put(&db, "github", sync_result.end_cursor, "ok", None).await?;
+                cursor::put(&db, "github", Some(sync_start.to_rfc3339()), "ok", None).await?;
             }
             Err(remote_err) => {
                 let err: GithubError = remote_err.into();
@@ -131,7 +142,7 @@ impl GithubSync for GithubSyncImpl {
                     error = %err,
                     "sync loop end"
                 );
-                cursor::put(&db, "github", None, "error", Some(err.to_string())).await?;
+                cursor::put(&db, "github", raw_cursor, "error", Some(err.to_string())).await?;
                 return if let GithubError::PartialResults = err {
                     Err(GithubError::PartialResults)
                 } else {
@@ -631,5 +642,101 @@ mod tests {
 
         let count = pull_request::Entity::find().count(&db).await.unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_pull_stores_watermark_on_success() {
+        let db = setup_db().await;
+
+        let page = GithubPage {
+            prs: vec![fetched_pr(42, false, false)],
+            end_cursor: None,
+            has_next_page: false,
+        };
+        let client = FakeClient {
+            pages: Arc::new(Mutex::new(vec![page])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![GithubFilter {
+                    repo: Some("org/repo".into()),
+                    ..Default::default()
+                }],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+        let state = sync.pull().await.unwrap();
+
+        assert_eq!(state.last_status, "ok");
+
+        let state = sync_state::Entity::find_by_id("github")
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("sync_state row must exist");
+        assert!(
+            state.cursor.is_some(),
+            "cursor must be set on success, got None"
+        );
+        let parsed = chrono::DateTime::parse_from_rfc3339(state.cursor.as_deref().unwrap());
+        assert!(
+            parsed.is_ok(),
+            "cursor must parse as RFC 3339, got {:?}",
+            state.cursor
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pull_preserves_watermark_on_error() {
+        let db = setup_db().await;
+
+        cursor::put(
+            &db,
+            "github",
+            Some("2026-09-07T09:37:00+00:00".into()),
+            "ok",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let client = FailingClient {
+            pages_before_fail: Arc::new(Mutex::new(vec![])),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let sync = new(
+            db.clone(),
+            Arc::new(client),
+            GithubOptions {
+                token: "tok".into(),
+                filters: vec![GithubFilter {
+                    repo: Some("org/repo".into()),
+                    ..Default::default()
+                }],
+                exclude_drafts_unless_authored_by_me: false,
+            },
+        );
+        let result = sync.pull().await;
+        assert!(
+            result.is_err(),
+            "pull must return Err on first-page failure"
+        );
+
+        let state = sync_state::Entity::find_by_id("github")
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("sync_state row must exist");
+        assert_eq!(
+            state.cursor.as_deref(),
+            Some("2026-09-07T09:37:00+00:00"),
+            "old watermark must be preserved on error"
+        );
     }
 }

@@ -49,34 +49,49 @@ impl GithubFilter {
 }
 
 /// Compile a list of filters into a single GitHub search query string.
-pub fn compile_github_query(filters: &[GithubFilter]) -> String {
+///
+/// When `since` is `Some(ts)` and the compiled query is non-empty, an
+/// `updated:>{ts}` clause is appended for incremental sync. Empty filters
+/// always produce an empty string regardless of `since`.
+pub fn compile_github_query(
+    filters: &[GithubFilter],
+    since: Option<chrono::DateTime<chrono::Utc>>,
+) -> String {
     let filters: Vec<&GithubFilter> = filters.iter().filter(|f| !f.is_empty()).collect();
     if filters.is_empty() {
         return String::new();
     }
 
-    if filters.len() == 1 {
+    let query = if filters.len() == 1 {
         let clause = filter_to_clause(filters[0]);
         if clause.is_empty() {
             return String::new();
         }
-        return format!("is:pr AND {clause}");
+        format!("is:pr AND {clause}")
+    } else {
+        let clauses: Vec<String> = filters.iter().map(|f| filter_to_clause(f)).collect();
+        let or_part = clauses
+            .iter()
+            .map(|c| {
+                // wrap multi-part clauses in parens for OR grouping
+                if c.contains(" AND ") {
+                    format!("({c})")
+                } else {
+                    c.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        format!("is:pr AND ({or_part})")
+    };
+
+    if let Some(ts) = since {
+        if !query.is_empty() {
+            return format!("{query} AND updated:>{}", ts.format("%Y-%m-%dT%H:%M:%SZ"));
+        }
     }
 
-    let clauses: Vec<String> = filters.iter().map(|f| filter_to_clause(f)).collect();
-    let or_part = clauses
-        .iter()
-        .map(|c| {
-            // wrap multi-part clauses in parens for OR grouping
-            if c.contains(" AND ") {
-                format!("({c})")
-            } else {
-                c.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    format!("is:pr AND ({or_part})")
+    query
 }
 
 fn filter_to_clause(f: &GithubFilter) -> String {
@@ -244,7 +259,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let got = compile_github_query(&filters);
+        let got = compile_github_query(&filters, None);
         let expected = "is:pr AND (author:@me OR (repo:api-specs AND team-review-requested:ai-agents AND (draft:false OR author:@me)))";
         assert_eq!(&got, expected);
     }
@@ -256,7 +271,7 @@ mod tests {
             exclude_others_drafts: true,
             ..Default::default()
         }];
-        let got = compile_github_query(&filters);
+        let got = compile_github_query(&filters, None);
         let expected = "is:pr AND repo:agent-api AND (draft:false OR author:@me)";
         assert_eq!(&got, expected);
     }
@@ -267,7 +282,7 @@ mod tests {
             repo: Some("albe2669/".into()),
             ..Default::default()
         }];
-        let got = compile_github_query(&filters);
+        let got = compile_github_query(&filters, None);
         let expected = "is:pr AND repo:albe2669/";
         assert_eq!(&got, expected);
     }
@@ -296,7 +311,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let got = compile_github_query(&filters);
+        let got = compile_github_query(&filters, None);
         let expected = "is:pr AND ((repo:ml-reasoning AND author:@me) OR (repo:ml-reasoning AND user-review-requested:@me) OR (repo:gocomo AND author:@me) OR (repo:gocomo AND user-review-requested:@me))";
         assert_eq!(&got, expected);
     }
@@ -304,7 +319,7 @@ mod tests {
     #[test]
     fn test_compile_github_query_empty_filters() {
         let filters: Vec<GithubFilter> = vec![];
-        let got = compile_github_query(&filters);
+        let got = compile_github_query(&filters, None);
         assert_eq!(got, "");
     }
 
@@ -320,12 +335,38 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let got = compile_github_query(&filters);
+        let got = compile_github_query(&filters, None);
         assert!(
             !got.contains("is:open"),
             "multi-filter query must not include is:open, got: {got}"
         );
         assert_eq!(&got, "is:pr AND (repo:a OR repo:b)");
+    }
+
+    #[test]
+    fn test_compile_github_query_with_since() {
+        let filters = vec![GithubFilter {
+            repo: Some("org/repo".into()),
+            ..Default::default()
+        }];
+        let since = chrono::DateTime::parse_from_rfc3339("2026-09-07T09:37:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let got = compile_github_query(&filters, Some(since));
+        assert_eq!(
+            got,
+            "is:pr AND repo:org/repo AND updated:>2026-09-07T09:37:00Z"
+        );
+    }
+
+    #[test]
+    fn test_compile_github_query_empty_filters_with_since_still_empty() {
+        let filters: Vec<GithubFilter> = vec![];
+        let since = chrono::DateTime::parse_from_rfc3339("2026-09-07T09:37:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let got = compile_github_query(&filters, Some(since));
+        assert_eq!(got, "");
     }
 
     // -----------------------------------------------------------------------
@@ -453,7 +494,7 @@ mod tests {
             exclude_others_drafts: true,
             ..Default::default()
         };
-        let got = compile_github_query(&[f]);
+        let got = compile_github_query(&[f], None);
         assert_eq!(&got, "is:pr AND (draft:false OR author:@me)");
     }
 
@@ -467,7 +508,7 @@ mod tests {
             exclude_my_drafts: true,
             ..Default::default()
         };
-        let got = compile_github_query(&[f]);
+        let got = compile_github_query(&[f], None);
         assert_eq!(&got, "is:pr AND draft:false");
     }
 
@@ -482,7 +523,7 @@ mod tests {
             exclude_my_drafts: true,
             ..Default::default()
         };
-        let got = compile_github_query(&[f]);
+        let got = compile_github_query(&[f], None);
         assert_eq!(&got, "is:pr AND draft:false");
     }
 

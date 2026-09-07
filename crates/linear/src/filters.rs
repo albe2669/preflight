@@ -32,18 +32,32 @@ impl LinearFilter {
 /// Returns [`Value::Null`] when no rules are present.  A single non-empty rule
 /// is returned as a bare clause; multiple rules are wrapped in an `"or"` array.
 /// Within a rule, multiple conditions are AND-ed via an `"and"` array.
-pub fn compile_linear_filter(filters: &[LinearFilter]) -> Value {
+pub fn compile_linear_filter(
+    filters: &[LinearFilter],
+    since: Option<chrono::DateTime<chrono::Utc>>,
+) -> Value {
     let mut clauses: Vec<Value> = filters
         .iter()
         .filter(|f| !f.is_empty())
         .map(rule_to_clause)
         .collect();
 
-    match clauses.len() {
+    let result = match clauses.len() {
         0 => Value::Null,
         1 => clauses.pop().unwrap(),
         _ => serde_json::json!({ "or": clauses }),
+    };
+
+    if let Some(ts) = since {
+        if let Value::Object(mut map) = result {
+            map.insert(
+                "updatedAt".into(),
+                serde_json::json!({ "gt": ts.to_rfc3339() }),
+            );
+            return Value::Object(map);
+        }
     }
+    result
 }
 
 fn rule_to_clause(f: &LinearFilter) -> Value {
@@ -91,7 +105,7 @@ mod tests {
     #[test]
     fn test_compile_linear_filter_empty_filters_returns_null() {
         let filters: Vec<LinearFilter> = vec![];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
         assert_eq!(result, Value::Null);
     }
 
@@ -101,7 +115,7 @@ mod tests {
             creator: Some(Actor::Me),
             ..Default::default()
         }];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
         let expected = serde_json::json!({
             "creator": { "me": true }
         });
@@ -120,7 +134,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
         let expected = serde_json::json!({
             "or": [
                 { "creator": { "me": true } },
@@ -137,7 +151,7 @@ mod tests {
             assignee: Some(Actor::Me),
             ..Default::default()
         }];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
         let expected = serde_json::json!({
             "and": [
                 { "team": { "key": "ENG" } },
@@ -154,7 +168,7 @@ mod tests {
             project_lead: Some(Actor::Me),
             ..Default::default()
         }];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
         let expected = serde_json::json!({
             "project": { "lead": { "me": true } }
         });
@@ -167,7 +181,7 @@ mod tests {
             project_lead: Some(Actor::Name("alice".into())),
             ..Default::default()
         }];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
         let expected = serde_json::json!({
             "project": { "lead": { "name": "alice" } }
         });
@@ -180,7 +194,7 @@ mod tests {
             assignee: Some(Actor::Name("bob".into())),
             ..Default::default()
         }];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
         let expected = serde_json::json!({
             "assignee": { "name": "bob" }
         });
@@ -193,7 +207,54 @@ mod tests {
             LinearFilter::default(), // all-None
             LinearFilter::default(), // all-None
         ];
-        let result = compile_linear_filter(&filters);
+        let result = compile_linear_filter(&filters, None);
+        assert_eq!(result, Value::Null);
+    }
+
+    fn parse_ts(s: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn test_compile_linear_filter_with_since() {
+        let filters = vec![LinearFilter {
+            team: Some("ENG".into()),
+            ..Default::default()
+        }];
+        let since = parse_ts("2026-09-07T09:37:00Z");
+        let result = compile_linear_filter(&filters, Some(since));
+        let expected = serde_json::json!({
+            "team": {"key": "ENG"},
+            "updatedAt": {"gt": "2026-09-07T09:37:00+00:00"}
+        });
+        pretty_assertions::assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_compile_linear_filter_with_since_or_clause() {
+        let filters = vec![
+            LinearFilter {
+                creator: Some(Actor::Me),
+                ..Default::default()
+            },
+            LinearFilter {
+                assignee: Some(Actor::Me),
+                ..Default::default()
+            },
+        ];
+        let since = parse_ts("2026-09-07T09:37:00Z");
+        let result = compile_linear_filter(&filters, Some(since));
+        assert!(result.get("or").is_some());
+        assert!(result.get("updatedAt").is_some());
+    }
+
+    #[test]
+    fn test_compile_linear_filter_null_with_since_stays_null() {
+        let filters: Vec<LinearFilter> = vec![];
+        let since = parse_ts("2026-09-07T09:37:00Z");
+        let result = compile_linear_filter(&filters, Some(since));
         assert_eq!(result, Value::Null);
     }
 }

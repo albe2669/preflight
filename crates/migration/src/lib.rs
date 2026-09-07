@@ -10,6 +10,7 @@ mod m20260101_000005_create_pull_request;
 mod m20260101_000006_create_linear_issue;
 mod m20260101_000007_create_sync_state;
 mod m20260120_000001_pr_review_fields;
+mod m20260907_000001_clear_sync_state_cursors;
 
 pub struct Migrator;
 
@@ -25,6 +26,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260101_000006_create_linear_issue::Migration),
             Box::new(m20260101_000007_create_sync_state::Migration),
             Box::new(m20260120_000001_pr_review_fields::Migration),
+            Box::new(m20260907_000001_clear_sync_state_cursors::Migration),
         ]
     }
 }

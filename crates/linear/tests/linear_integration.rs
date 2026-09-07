@@ -792,7 +792,7 @@ async fn test_request_encoding() {
         assignee: Some(Actor::Me),
         ..Default::default()
     };
-    let compiled_filter = compile_linear_filter(&[filter.clone()]);
+    let compiled_filter = compile_linear_filter(&[filter.clone()], None);
 
     // We capture request details via a custom Matcher to inspect headers
     // and body, then assert in the test after pull() returns.
