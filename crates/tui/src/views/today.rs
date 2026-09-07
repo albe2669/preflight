@@ -131,6 +131,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
 pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
     let plan_count = app.today_plan().len();
+    let prev_cursor = app.cursor;
     match key {
         KeyCode::Char('j') | KeyCode::Down if app.cursor + 1 < plan_count => {
             app.cursor += 1;
@@ -246,16 +247,18 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
         }
         _ => {}
     }
+    if app.cursor != prev_cursor {
+        app.maybe_fetch_cursor_detail();
+    }
 }
 
 #[cfg(test)]
 mod render_tests {
-    use ratatui::{Terminal, backend::TestBackend};
-
     use crate::app::tests::{make_plan_row, make_todo};
     use crate::app::{App, Mode};
     use crate::test_support::buffer_text;
     use crate::theme::Glyph;
+    use ratatui::{Terminal, backend::TestBackend};
 
     fn render_today(app: &mut App) -> String {
         let backend = TestBackend::new(120, 40);

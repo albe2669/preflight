@@ -410,7 +410,7 @@ pub(crate) fn render_command_palette(f: &mut Frame, app: &App, area: ratatui::la
     let input = input.clone();
     let selection = *selection;
 
-    let filtered = crate::app::input::filter_commands(&input);
+    let filtered = crate::app::input::filter_commands(app, &input);
     let width = 50u16.min(area.width);
     let height = (filtered.len() as u16 + 2).min(10);
     let x = area.x + (area.width - width) / 2;
@@ -452,7 +452,7 @@ pub(crate) fn render_command_palette(f: &mut Frame, app: &App, area: ratatui::la
                 } else {
                     Style::default()
                 };
-                ListItem::new(Line::from(cmd.label).style(style))
+                ListItem::new(Line::from(cmd.label.clone()).style(style))
             })
             .collect();
         let list = List::new(lines);

@@ -229,7 +229,7 @@ fn status_hints(app: &App) -> String {
             "/ search  t plan today  SPC status  D done  enter detail  a add".into()
         }
         (View::Inbox, _) => {
-            "C convert  L link  d dismiss  o open url  s sync group  D show dismissed".into()
+            "C convert  L link  d dismiss  o open url  s sync group  D show closed".into()
         }
         (View::Review, _) => {
             "h/l prev/next day  g pick date  enter open todo  a actor filter".into()

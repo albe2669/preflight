@@ -90,6 +90,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
+    let prev_cursor = app.cursor;
     match key {
         KeyCode::Char('j') | KeyCode::Down => {
             app.cursor = app.cursor.saturating_add(1);
@@ -180,6 +181,9 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             }
         }
         _ => {}
+    }
+    if app.cursor != prev_cursor {
+        app.maybe_fetch_cursor_detail();
     }
 }
 

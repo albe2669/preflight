@@ -56,6 +56,7 @@ pub async fn run(endpoint: &str) -> anyhow::Result<()> {
         Ok(d) => {
             app.data = crate::app::AppData::from_fetch_all(d);
             app.clamp_cursor_to_active();
+            app.maybe_fetch_cursor_detail();
         }
         Err(e) => app.set_error(format!("connect failed: {e}")),
     }

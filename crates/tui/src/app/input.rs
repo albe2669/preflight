@@ -216,40 +216,49 @@ impl App {
     }
 
     fn key_command(&mut self, key: KeyEvent) {
-        let (input, selection, caret) = match &mut self.mode {
+        let (input_clone, selection_val) = match &self.mode {
             Mode::Command {
-                input,
-                selection,
-                caret,
-            } => (input, selection, caret),
+                input, selection, ..
+            } => (input.clone(), *selection),
             _ => unreachable!(),
         };
-        if edit::edit_chord(key.code, key.modifiers, input, caret) {
-            return;
+        if let Mode::Command { input, caret, .. } = &mut self.mode {
+            if edit::edit_chord(key.code, key.modifiers, input, caret) {
+                return;
+            }
         }
         use crossterm::event::KeyCode::*;
         match key.code {
             Char('j') | Down => {
-                let filtered = filter_commands(input);
+                let filtered = filter_commands(self, &input_clone);
                 if !filtered.is_empty() {
-                    *selection = (*selection + 1) % filtered.len();
+                    let new_sel = (selection_val + 1) % filtered.len();
+                    if let Mode::Command { selection, .. } = &mut self.mode {
+                        *selection = new_sel;
+                    }
                 }
             }
             Char('k') | Up => {
-                let filtered = filter_commands(input);
+                let filtered = filter_commands(self, &input_clone);
                 if !filtered.is_empty() {
-                    *selection = selection.checked_sub(1).unwrap_or(filtered.len() - 1);
+                    let new_sel = selection_val.checked_sub(1).unwrap_or(filtered.len() - 1);
+                    if let Mode::Command { selection, .. } = &mut self.mode {
+                        *selection = new_sel;
+                    }
                 }
             }
             Tab => {
-                let filtered = filter_commands(input);
+                let filtered = filter_commands(self, &input_clone);
                 if !filtered.is_empty() {
-                    *selection = (*selection + 1) % filtered.len();
+                    let new_sel = (selection_val + 1) % filtered.len();
+                    if let Mode::Command { selection, .. } = &mut self.mode {
+                        *selection = new_sel;
+                    }
                 }
             }
             Enter => {
-                let filtered = filter_commands(input);
-                if let Some(cmd) = filtered.get(*selection) {
+                let filtered = filter_commands(self, &input_clone);
+                if let Some(cmd) = filtered.get(selection_val) {
                     let action = cmd.action;
                     self.mode = Mode::Navigate;
                     action(self);
@@ -258,24 +267,48 @@ impl App {
                 }
             }
             Char(c) if c.is_alphanumeric() || c == ' ' => {
-                *caret = edit::insert_char(input, *caret, c);
-                *selection = 0;
+                if let Mode::Command {
+                    input,
+                    caret,
+                    selection,
+                    ..
+                } = &mut self.mode
+                {
+                    *caret = edit::insert_char(input, *caret, c);
+                    *selection = 0;
+                }
             }
             Backspace => {
-                *caret = edit::backspace(input, *caret);
-                *selection = 0;
+                if let Mode::Command {
+                    input,
+                    caret,
+                    selection,
+                    ..
+                } = &mut self.mode
+                {
+                    *caret = edit::backspace(input, *caret);
+                    *selection = 0;
+                }
             }
             Left => {
-                *caret = edit::move_caret(input, *caret, -1);
+                if let Mode::Command { caret, input, .. } = &mut self.mode {
+                    *caret = edit::move_caret(input, *caret, -1);
+                }
             }
             Right => {
-                *caret = edit::move_caret(input, *caret, 1);
+                if let Mode::Command { caret, input, .. } = &mut self.mode {
+                    *caret = edit::move_caret(input, *caret, 1);
+                }
             }
             Home => {
-                *caret = 0;
+                if let Mode::Command { caret, .. } = &mut self.mode {
+                    *caret = 0;
+                }
             }
             End => {
-                *caret = input.len();
+                if let Mode::Command { caret, input, .. } = &mut self.mode {
+                    *caret = input.len();
+                }
             }
             _ => {}
         }
@@ -325,107 +358,178 @@ fn sidebar_add_active_buf_caret_mut(app: &mut App) -> (&mut String, &mut usize) 
 }
 
 pub(crate) struct Command {
-    pub(crate) label: &'static str,
+    pub(crate) label: String,
     action: fn(&mut App),
 }
 
-const COMMANDS: &[Command] = &[
-    Command {
-        label: "today",
-        action: |app| {
-            app.switch_view(crate::app::View::Today);
-        },
-    },
-    Command {
-        label: "backlog",
-        action: |app| {
-            app.switch_view(crate::app::View::Backlog);
-        },
-    },
-    Command {
-        label: "inbox",
-        action: |app| {
-            app.switch_view(crate::app::View::Inbox);
-        },
-    },
-    Command {
-        label: "review",
-        action: |app| {
-            app.switch_view(crate::app::View::Review);
-        },
-    },
-    Command {
-        label: "sync",
-        action: |app| {
-            app.switch_view(crate::app::View::Sync);
-        },
-    },
-    Command {
-        label: "sync github",
-        action: |app| {
-            app.spawn_sync_github();
-        },
-    },
-    Command {
-        label: "sync linear",
-        action: |app| {
-            app.spawn_sync_linear();
-        },
-    },
-    Command {
-        label: "carry over",
-        action: |app| {
-            let from = (app.logical_date - chrono::Duration::days(1))
-                .format("%Y-%m-%d")
-                .to_string();
-            let to = app.logical_date.format("%Y-%m-%d").to_string();
-            app.mode = Mode::Confirm {
-                action: crate::app::ConfirmAction::CarryOver { from, to },
-            };
-        },
-    },
-    Command {
-        label: "refresh",
-        action: |app| {
-            app.spawn_refresh();
-        },
-    },
-    Command {
-        label: "toggle done",
-        action: |app| {
-            app.show_done = !app.show_done;
-        },
-    },
-    Command {
-        label: "toggle dismissed",
-        action: |app| {
-            app.show_dismissed = !app.show_dismissed;
-        },
-    },
-    Command {
-        label: "help",
-        action: |app| {
-            app.mode = Mode::Help {
-                filter: String::new(),
-            };
-            app.help_scroll = 0;
-        },
-    },
-    Command {
-        label: "quit",
-        action: |app| {
-            app.quit_requested = true;
-        },
-    },
+type StaticCommand = (&'static str, fn(&mut App));
+
+static COMMANDS: &[StaticCommand] = &[
+    ("today", |app| app.switch_view(crate::app::View::Today)),
+    ("backlog", |app| app.switch_view(crate::app::View::Backlog)),
+    ("inbox", |app| app.switch_view(crate::app::View::Inbox)),
+    ("review", |app| app.switch_view(crate::app::View::Review)),
+    ("sync", |app| app.switch_view(crate::app::View::Sync)),
+    ("sync github", |app| app.spawn_sync_github()),
+    ("sync linear", |app| app.spawn_sync_linear()),
+    ("carry over", |app| {
+        let from = (app.logical_date - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let to = app.logical_date.format("%Y-%m-%d").to_string();
+        app.mode = Mode::Confirm {
+            action: crate::app::ConfirmAction::CarryOver { from, to },
+        };
+    }),
+    ("refresh", |app| app.spawn_refresh()),
+    ("toggle done", |app| app.show_done = !app.show_done),
+    ("toggle dismissed", |app| {
+        app.show_dismissed = !app.show_dismissed
+    }),
+    ("toggle closed", |app| app.show_closed = !app.show_closed),
+    ("help", |app| {
+        app.mode = Mode::Help {
+            filter: String::new(),
+        };
+        app.help_scroll = 0;
+    }),
+    ("quit", |app| app.quit_requested = true),
 ];
 
-pub(crate) fn filter_commands(input: &str) -> Vec<&'static Command> {
-    if input.is_empty() {
-        return COMMANDS.iter().collect();
-    }
-    let needle = input.to_lowercase();
+fn static_commands() -> Vec<Command> {
     COMMANDS
         .iter()
+        .map(|(label, action)| Command {
+            label: (*label).to_string(),
+            action: *action,
+        })
+        .collect()
+}
+
+fn cursor_todo_info(app: &App) -> Option<(i32, String, Option<String>, String)> {
+    match app.view {
+        crate::app::View::Today => app.today_plan().get(app.cursor).map(|t| {
+            (
+                t.id,
+                t.title.clone(),
+                t.description.clone(),
+                t.status.clone(),
+            )
+        }),
+        crate::app::View::Backlog => app.backlog().get(app.cursor).map(|t| {
+            (
+                t.id,
+                t.title.clone(),
+                t.description.clone(),
+                t.status.clone(),
+            )
+        }),
+        _ => None,
+    }
+}
+
+fn cursor_commands(app: &App) -> Vec<Command> {
+    if cursor_todo_info(app).is_none() {
+        return Vec::new();
+    }
+    let is_today = app.view == crate::app::View::Today;
+    let mut cmds = Vec::new();
+
+    cmds.push(Command {
+        label: "set status".into(),
+        action: |app| {
+            if let Some((id, _, _, status)) = cursor_todo_info(app) {
+                let selection = crate::app::status_index(&status).unwrap_or(0);
+                app.mode = Mode::StatusSelect {
+                    id,
+                    selection,
+                    reason: None,
+                };
+            }
+        },
+    });
+
+    if is_today {
+        cmds.push(Command {
+            label: "unplan for today".into(),
+            action: |app| {
+                if let Some((id, _, _, _)) = cursor_todo_info(app) {
+                    app.mode = Mode::Confirm {
+                        action: crate::app::ConfirmAction::Unplan { id },
+                    };
+                }
+            },
+        });
+    }
+
+    cmds.push(Command {
+        label: "cancel todo".into(),
+        action: |app| {
+            if let Some((id, _, _, _)) = cursor_todo_info(app) {
+                app.mode = Mode::Confirm {
+                    action: crate::app::ConfirmAction::Cancel { id },
+                };
+            }
+        },
+    });
+
+    cmds.push(Command {
+        label: "edit title".into(),
+        action: |app| {
+            if let Some((id, title, _, _)) = cursor_todo_info(app) {
+                let caret = title.len();
+                app.mode = Mode::InlineEdit {
+                    id,
+                    input: title,
+                    caret,
+                };
+            }
+        },
+    });
+
+    cmds.push(Command {
+        label: "open sidebar".into(),
+        action: |app| {
+            if let Some((id, title, desc, _)) = cursor_todo_info(app) {
+                if app.content_width < 100 {
+                    app.set_error("terminal too narrow for sidebar");
+                } else {
+                    let title_caret = title.len();
+                    let desc = desc.unwrap_or_default();
+                    app.mode = Mode::SidebarEdit {
+                        id,
+                        field: SidebarField::Description,
+                        input_active: false,
+                        title_input: title,
+                        title_caret,
+                        desc_input: desc,
+                        desc_caret: 0,
+                        desc_scroll: 0,
+                        tag_input: String::new(),
+                        tag_caret: 0,
+                        link_kind: crate::app::LinkKind::Pr,
+                        link_selection: 0,
+                        attaching: false,
+                        link_search: String::new(),
+                        scroll: 0,
+                    };
+                    app.spawn_fetch_detail(id);
+                }
+            }
+        },
+    });
+
+    cmds
+}
+
+pub(crate) fn filter_commands(app: &App, input: &str) -> Vec<Command> {
+    let mut all = static_commands();
+    all.extend(cursor_commands(app));
+    if input.is_empty() {
+        return all;
+    }
+    let needle = input.to_lowercase();
+    all.into_iter()
         .filter(|c| c.label.to_lowercase().contains(&needle))
         .collect()
 }
@@ -445,9 +549,202 @@ mod tests {
 
     #[test]
     fn test_command_palette_filters_by_substring() {
-        let filtered = filter_commands("sync");
+        let app = App::default();
+        let filtered = filter_commands(&app, "sync");
         assert!(filtered.iter().any(|c| c.label == "sync github"));
         assert!(filtered.iter().any(|c| c.label == "sync linear"));
+    }
+
+    #[test]
+    fn test_command_palette_shows_todo_commands_on_today() {
+        let mut app = App {
+            view: View::Today,
+            content_width: 120,
+            ..Default::default()
+        };
+        app.data.plan.push(crate::app::tests::make_plan_row(
+            1,
+            0,
+            crate::app::tests::make_todo(10, "write docs", "todo"),
+            None,
+        ));
+        let filtered = filter_commands(&app, "");
+        assert!(
+            filtered.iter().any(|c| c.label == "set status"),
+            "todo commands should appear when cursor is on a todo"
+        );
+        assert!(
+            filtered.iter().any(|c| c.label == "edit title"),
+            "edit title command should appear"
+        );
+        assert!(
+            filtered.iter().any(|c| c.label == "open sidebar"),
+            "open sidebar command should appear"
+        );
+        assert!(
+            filtered.iter().any(|c| c.label == "cancel todo"),
+            "cancel todo command should appear"
+        );
+        assert!(
+            filtered.iter().any(|c| c.label == "unplan for today"),
+            "unplan command should appear on Today view"
+        );
+    }
+
+    #[test]
+    fn test_command_palette_shows_todo_commands_on_backlog() {
+        let mut app = App {
+            view: View::Backlog,
+            content_width: 120,
+            ..Default::default()
+        };
+        app.data
+            .todos
+            .push(crate::app::tests::make_todo(10, "write docs", "todo"));
+        let filtered = filter_commands(&app, "");
+        assert!(filtered.iter().any(|c| c.label == "set status"));
+        assert!(filtered.iter().any(|c| c.label == "edit title"));
+        assert!(filtered.iter().any(|c| c.label == "open sidebar"));
+        assert!(filtered.iter().any(|c| c.label == "cancel todo"));
+        assert!(
+            !filtered.iter().any(|c| c.label == "unplan for today"),
+            "unplan command should not appear on Backlog view"
+        );
+    }
+
+    #[test]
+    fn test_command_palette_no_todo_commands_without_cursor_todo() {
+        let app = App::default();
+        let filtered = filter_commands(&app, "");
+        assert!(
+            !filtered.iter().any(|c| c.label == "set status"),
+            "todo commands should not appear without a cursor todo"
+        );
+        assert!(!filtered.iter().any(|c| c.label == "edit title"));
+        assert!(!filtered.iter().any(|c| c.label == "open sidebar"));
+        assert!(!filtered.iter().any(|c| c.label == "cancel todo"));
+    }
+
+    #[test]
+    fn test_command_palette_no_todo_commands_in_inbox_view() {
+        let app = App {
+            view: View::Inbox,
+            ..Default::default()
+        };
+        let filtered = filter_commands(&app, "");
+        assert!(
+            !filtered.iter().any(|c| c.label == "set status"),
+            "todo commands should not appear in inbox view"
+        );
+        assert!(!filtered.iter().any(|c| c.label == "edit title"));
+    }
+
+    #[test]
+    fn test_command_palette_executes_set_status() {
+        let mut app = App {
+            view: View::Today,
+            content_width: 120,
+            mode: Mode::Command {
+                input: "set status".into(),
+                selection: 0,
+                caret: 9,
+            },
+            ..Default::default()
+        };
+        app.data.plan.push(crate::app::tests::make_plan_row(
+            1,
+            0,
+            crate::app::tests::make_todo(10, "write docs", "todo"),
+            None,
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(app.mode, Mode::StatusSelect { id: 10, .. }));
+    }
+
+    #[test]
+    fn test_command_palette_executes_edit_title() {
+        let mut app = App {
+            view: View::Today,
+            content_width: 120,
+            mode: Mode::Command {
+                input: "edit title".into(),
+                selection: 0,
+                caret: 10,
+            },
+            ..Default::default()
+        };
+        app.data.plan.push(crate::app::tests::make_plan_row(
+            1,
+            0,
+            crate::app::tests::make_todo(10, "write docs", "todo"),
+            None,
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match &app.mode {
+            Mode::InlineEdit { id, input, .. } => {
+                assert_eq!(*id, 10);
+                assert_eq!(input, "write docs");
+            }
+            _ => panic!("expected InlineEdit mode"),
+        }
+    }
+
+    #[test]
+    fn test_command_palette_executes_unplan() {
+        let mut app = App {
+            view: View::Today,
+            content_width: 120,
+            mode: Mode::Command {
+                input: "unplan".into(),
+                selection: 0,
+                caret: 6,
+            },
+            ..Default::default()
+        };
+        app.data.plan.push(crate::app::tests::make_plan_row(
+            1,
+            0,
+            crate::app::tests::make_todo(10, "write docs", "todo"),
+            None,
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match &app.mode {
+            Mode::Confirm {
+                action: crate::app::ConfirmAction::Unplan { id },
+            } => {
+                assert_eq!(*id, 10);
+            }
+            _ => panic!("expected Confirm mode with Unplan action"),
+        }
+    }
+
+    #[test]
+    fn test_command_palette_executes_cancel_todo() {
+        let mut app = App {
+            view: View::Today,
+            content_width: 120,
+            mode: Mode::Command {
+                input: "cancel".into(),
+                selection: 0,
+                caret: 6,
+            },
+            ..Default::default()
+        };
+        app.data.plan.push(crate::app::tests::make_plan_row(
+            1,
+            0,
+            crate::app::tests::make_todo(10, "write docs", "todo"),
+            None,
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match &app.mode {
+            Mode::Confirm {
+                action: crate::app::ConfirmAction::Cancel { id },
+            } => {
+                assert_eq!(*id, 10);
+            }
+            _ => panic!("expected Confirm mode with Cancel action"),
+        }
     }
 
     #[test]

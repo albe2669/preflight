@@ -54,12 +54,27 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let mut cursor_to_row: Vec<usize> = Vec::new();
     let mut row_idx: usize = 0;
 
-    // GitHub group header.
-    rows.push(group_header_row(&format!(
-        "GITHUB · {} pull requests · {}",
+    let hidden_prs = if app.show_closed {
+        0
+    } else {
+        app.data
+            .pulls
+            .iter()
+            .filter(|p| app.show_dismissed || p.dismissed_at.is_none())
+            .filter(|p| matches!(p.state.as_str(), "closed" | "merged"))
+            .count()
+    };
+    let pr_header = format!(
+        "GITHUB · {} pull requests · {}{}",
         prs.len(),
-        pr_sync_label
-    )));
+        pr_sync_label,
+        if hidden_prs > 0 {
+            format!(" · {} closed/merged hidden", hidden_prs)
+        } else {
+            String::new()
+        }
+    );
+    rows.push(group_header_row(&pr_header));
     row_idx += 1;
 
     let mut seen_closed = false;
@@ -77,13 +92,27 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     rows.push(Row::new(vec![Cell::from("")]));
     row_idx += 1;
-
-    // Linear group header.
-    rows.push(group_header_row(&format!(
-        "LINEAR · {} issues · {}",
+    let hidden_linears = if app.show_closed {
+        0
+    } else {
+        app.data
+            .linears
+            .iter()
+            .filter(|l| app.show_dismissed || l.dismissed_at.is_none())
+            .filter(|l| matches!(l.state_type.as_str(), "completed" | "canceled"))
+            .count()
+    };
+    let lin_header = format!(
+        "LINEAR · {} issues · {}{}",
         linears.len(),
-        lin_sync_label
-    )));
+        lin_sync_label,
+        if hidden_linears > 0 {
+            format!(" · {} completed/canceled hidden", hidden_linears)
+        } else {
+            String::new()
+        }
+    );
+    rows.push(group_header_row(&lin_header));
     row_idx += 1;
 
     let mut seen_done = false;
@@ -293,7 +322,8 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             }
         }
         KeyCode::Char('D') => {
-            app.show_dismissed = !app.show_dismissed;
+            app.show_closed = !app.show_closed;
+            app.cursor = 0;
         }
         KeyCode::Char('s') => {
             let prs = app.inbox_prs();
@@ -443,7 +473,10 @@ mod render_tests {
 
     #[test]
     fn test_inbox_orders_closed_prs_after_open() {
-        let mut app = App::default();
+        let mut app = App {
+            show_closed: true,
+            ..Default::default()
+        };
         app.data.pulls = vec![
             crate::gql::PullRequest {
                 id: 1,
@@ -473,8 +506,49 @@ mod render_tests {
             "open PR should appear before closed PR:\n{buffer}"
         );
     }
-}
 
+    #[test]
+    fn test_inbox_hides_closed_prs_by_default() {
+        let mut app = App::default();
+        app.data.pulls = vec![
+            make_pr(1, None),
+            crate::gql::PullRequest {
+                id: 2,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 2,
+                title: "ClosedOne".into(),
+                url: "x".into(),
+                author: None,
+                state: "closed".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                dismissed_at: None,
+            },
+        ];
+        let buffer = render_inbox(&mut app);
+        assert!(buffer.contains("PR #1"), "open PR should appear");
+        assert!(!buffer.contains("ClosedOne"), "closed PR should be hidden");
+        assert!(
+            buffer.contains("1 closed/merged hidden"),
+            "header should show hidden count"
+        );
+
+        app.show_closed = true;
+        let buffer = render_inbox(&mut app);
+        assert!(
+            buffer.contains("ClosedOne"),
+            "closed PR should appear when toggled"
+        );
+        assert!(
+            !buffer.contains("hidden"),
+            "header should not show hidden count when show_closed is true"
+        );
+    }
+}
 #[cfg(test)]
 mod navigate_tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -917,6 +991,21 @@ mod navigate_tests {
             toast.message.contains("example.com"),
             "o should surface the Linear url, got {:?}",
             toast.message
+        );
+    }
+
+    #[test]
+    fn test_d_toggles_show_closed() {
+        let mut app = App::default();
+        assert!(!app.show_closed, "show_closed should default to false");
+
+        super::handle_navigate(&mut app, KeyCode::Char('D'));
+        assert!(app.show_closed, "D should toggle show_closed to true");
+
+        super::handle_navigate(&mut app, KeyCode::Char('D'));
+        assert!(
+            !app.show_closed,
+            "D should toggle show_closed back to false"
         );
     }
 }

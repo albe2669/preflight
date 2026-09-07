@@ -12,6 +12,7 @@ impl App {
         if self.view == View::Review {
             self.spawn_fetch_review();
         }
+        self.maybe_fetch_cursor_detail();
     }
 
     pub(crate) fn prev_view(&mut self) {
@@ -23,7 +24,9 @@ impl App {
         if self.view == View::Review {
             self.spawn_fetch_review();
         }
+        self.maybe_fetch_cursor_detail();
     }
+
     pub(crate) fn switch_view(&mut self, view: View) {
         self.generation = self.generation.wrapping_add(1);
         self.view = view;
@@ -32,5 +35,6 @@ impl App {
         if self.view == View::Review {
             self.spawn_fetch_review();
         }
+        self.maybe_fetch_cursor_detail();
     }
 }

@@ -230,6 +230,7 @@ pub struct App {
     pub toast: Option<Toast>,
     pub spinner: u8,
     pub show_dismissed: bool,
+    pub show_closed: bool,
     pub show_done: bool,
     pub detail: Option<DetailData>,
     pub help_scroll: usize,
@@ -266,6 +267,7 @@ impl Default for App {
             toast: None,
             spinner: 0,
             show_dismissed: false,
+            show_closed: false,
             show_done: false,
             detail: None,
             help_scroll: 0,
@@ -377,30 +379,36 @@ impl App {
         )
     }
 
-    /// Non-dismissed PRs, open/draft before closed/merged (source order within).
+    /// Non-dismissed PRs. When `show_closed` is false, closed/merged PRs are
+    /// hidden (drafts remain — work in progress is still relevant for triage).
+    /// Open/draft before closed/merged in sort order.
     pub fn inbox_prs(&self) -> Vec<&PullRequest> {
         let mut prs: Vec<&PullRequest> = self
             .data
             .pulls
             .iter()
             .filter(|p| self.show_dismissed || p.dismissed_at.is_none())
+            .filter(|p| self.show_closed || !matches!(p.state.as_str(), "closed" | "merged"))
             .collect();
         prs.sort_by_key(|p| matches!(p.state.as_str(), "closed" | "merged" | "draft"));
         prs
     }
-
-    /// Non-dismissed Linear issues, active before completed/canceled.
+    /// Non-dismissed Linear issues. When `show_closed` is false,
+    /// completed/canceled issues are hidden. Active before terminal in sort
+    /// order.
     pub fn inbox_linears(&self) -> Vec<&crate::gql::LinearIssue> {
         let mut linears: Vec<&crate::gql::LinearIssue> = self
             .data
             .linears
             .iter()
             .filter(|l| self.show_dismissed || l.dismissed_at.is_none())
+            .filter(|l| {
+                self.show_closed || !matches!(l.state_type.as_str(), "completed" | "canceled")
+            })
             .collect();
         linears.sort_by_key(|l| matches!(l.state_type.as_str(), "completed" | "canceled"));
         linears
     }
-
     pub fn sync_by_source(&self, source: &str) -> Option<&SyncState> {
         self.data.sync.iter().find(|s| s.source == source)
     }
@@ -457,6 +465,21 @@ impl App {
             .iter()
             .position(|t| matches!(t.status.as_str(), "todo" | "started" | "blocked"))
             .unwrap_or(0);
+    }
+
+    /// Fetch detail data for the cursor todo if it differs from what is loaded.
+    /// No-op when the cursor is not on a todo or the detail is already current.
+    pub fn maybe_fetch_cursor_detail(&mut self) {
+        let cursor_todo_id = match self.view {
+            View::Today => self.today_plan().get(self.cursor).map(|t| t.id),
+            View::Backlog => self.backlog().get(self.cursor).map(|t| t.id),
+            _ => None,
+        };
+        if let Some(id) = cursor_todo_id {
+            if Some(id) != self.detail_loaded_id {
+                self.spawn_fetch_detail(id);
+            }
+        }
     }
 }
 
@@ -912,6 +935,71 @@ pub(crate) mod tests {
         assert_eq!(prs.len(), 2);
     }
 
+    #[test]
+    fn test_inbox_prs_hides_closed_by_default() {
+        let mut app = App::default();
+        app.data.pulls = vec![
+            make_pr(1, None),
+            crate::gql::PullRequest {
+                id: 2,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 2,
+                title: "Closed PR".into(),
+                url: "x".into(),
+                author: None,
+                state: "closed".into(),
+                review_requested: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                authored_by_me: false,
+                dismissed_at: None,
+            },
+            crate::gql::PullRequest {
+                id: 3,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 3,
+                title: "Merged PR".into(),
+                url: "x".into(),
+                author: None,
+                state: "merged".into(),
+                review_requested: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                authored_by_me: false,
+                dismissed_at: None,
+            },
+            crate::gql::PullRequest {
+                id: 4,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 4,
+                title: "Draft PR".into(),
+                url: "x".into(),
+                author: None,
+                state: "draft".into(),
+                review_requested: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                authored_by_me: false,
+                dismissed_at: None,
+            },
+        ];
+
+        let prs = app.inbox_prs();
+        assert_eq!(prs.len(), 2, "closed/merged hidden, draft still shown");
+        assert_eq!(prs[0].id, 1);
+        assert_eq!(prs[1].id, 4, "draft should still appear");
+
+        app.show_closed = true;
+        let prs = app.inbox_prs();
+        assert_eq!(prs.len(), 4, "all PRs visible when show_closed is true");
+    }
+
     // -- inbox_linears tests --
 
     #[test]
@@ -933,6 +1021,52 @@ pub(crate) mod tests {
 
         let linears = app.inbox_linears();
         assert_eq!(linears.len(), 2);
+    }
+
+    #[test]
+    fn test_inbox_linears_hides_closed_by_default() {
+        let mut app = App::default();
+        app.data.linears = vec![
+            make_linear(1, None),
+            crate::gql::LinearIssue {
+                id: 2,
+                identifier: "PROJ-2".into(),
+                title: "Done issue".into(),
+                url: "x".into(),
+                state_name: "Done".into(),
+                state_type: "completed".into(),
+                priority: None,
+                team_key: None,
+                assignee_name: None,
+                assigned_to_me: false,
+                dismissed_at: None,
+            },
+            crate::gql::LinearIssue {
+                id: 3,
+                identifier: "PROJ-3".into(),
+                title: "Canceled issue".into(),
+                url: "x".into(),
+                state_name: "Canceled".into(),
+                state_type: "canceled".into(),
+                priority: None,
+                team_key: None,
+                assignee_name: None,
+                assigned_to_me: false,
+                dismissed_at: None,
+            },
+        ];
+
+        let linears = app.inbox_linears();
+        assert_eq!(linears.len(), 1, "completed/canceled hidden by default");
+        assert_eq!(linears[0].id, 1);
+
+        app.show_closed = true;
+        let linears = app.inbox_linears();
+        assert_eq!(
+            linears.len(),
+            3,
+            "all issues visible when show_closed is true"
+        );
     }
 
     // -- sync_by_source tests --
@@ -1109,14 +1243,13 @@ pub(crate) mod tests {
     #[test]
     fn test_default_app_state() {
         let app = App::default();
-        assert_eq!(app.view, View::Today);
-        assert_eq!(app.mode, Mode::Navigate);
+        assert!(!app.show_dismissed);
+        assert!(!app.show_closed);
         assert_eq!(app.cursor, 0);
         assert_eq!(app.spinner, 0);
-        assert!(!app.show_dismissed);
         assert!(!app.show_done);
-        assert!(app.toast.is_none());
         assert!(app.data.todos.is_empty());
+        assert!(app.toast.is_none());
         assert!(app.data.plan.is_empty());
         assert!(app.data.pulls.is_empty());
         assert!(app.data.linears.is_empty());
@@ -1340,6 +1473,62 @@ pub(crate) mod tests {
             titles,
             vec!["start", "tod", "canc"],
             "backlog must be display-ordered (started, todo, cancelled)"
+        );
+    }
+
+    #[test]
+    fn test_cursor_move_triggers_detail_fetch() {
+        let mut app = App::default();
+        app.data.todos = vec![
+            make_todo(1, "Task 1", "todo"),
+            make_todo(2, "Task 2", "todo"),
+        ];
+        app.data.plan = vec![
+            make_plan_row(1, 0, make_todo(1, "Task 1", "todo"), None),
+            make_plan_row(2, 0, make_todo(2, "Task 2", "todo"), None),
+        ];
+        app.cursor = 0;
+        app.maybe_fetch_cursor_detail();
+        assert_eq!(
+            app.detail_loaded_id,
+            Some(1),
+            "cursor on todo 1 should fetch detail for id 1"
+        );
+        app.cursor = 1;
+        app.maybe_fetch_cursor_detail();
+        assert_eq!(
+            app.detail_loaded_id,
+            Some(2),
+            "cursor on todo 2 should fetch detail for id 2"
+        );
+    }
+
+    #[test]
+    fn test_cursor_move_noop_when_same_todo() {
+        let mut app = App::default();
+        app.data.todos = vec![make_todo(1, "Task 1", "todo")];
+        app.data.plan = vec![make_plan_row(1, 0, make_todo(1, "Task 1", "todo"), None)];
+        app.cursor = 0;
+        app.maybe_fetch_cursor_detail();
+        assert_eq!(app.detail_loaded_id, Some(1));
+        app.maybe_fetch_cursor_detail();
+        assert_eq!(
+            app.detail_loaded_id,
+            Some(1),
+            "same cursor todo should not re-fetch"
+        );
+    }
+
+    #[test]
+    fn test_cursor_move_noop_on_non_todo_view() {
+        let mut app = App {
+            view: View::Inbox,
+            ..Default::default()
+        };
+        app.maybe_fetch_cursor_detail();
+        assert_eq!(
+            app.detail_loaded_id, None,
+            "non-todo view should not trigger detail fetch"
         );
     }
 }
