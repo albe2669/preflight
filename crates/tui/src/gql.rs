@@ -88,6 +88,10 @@ pub struct PullRequest {
     pub copilot_comments: bool,
     #[cynic(rename = "mergeConflicts")]
     pub merge_conflicts: bool,
+    #[cynic(rename = "approved")]
+    pub approved: bool,
+    #[cynic(rename = "actionsFailing")]
+    pub actions_failing: bool,
     #[cynic(rename = "dismissedAt")]
     pub dismissed_at: Option<String>,
     #[cynic(rename = "remoteUpdatedAt")]

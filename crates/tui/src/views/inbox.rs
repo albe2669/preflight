@@ -89,8 +89,22 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     rows.push(group_header_row(&pr_header));
     row_idx += 1;
 
+    let mut sorted_prs: Vec<&crate::gql::PullRequest> = prs.clone();
+    sorted_prs.sort_by(|a, b| {
+        (a.owner.as_str(), a.repo.as_str()).cmp(&(b.owner.as_str(), b.repo.as_str()))
+    });
+
     let mut seen_closed = false;
-    for (i, pr) in prs.iter().enumerate() {
+    let mut current_repo: Option<(String, String)> = None;
+    for (i, pr) in sorted_prs.iter().enumerate() {
+        let repo_key = (pr.owner.clone(), pr.repo.clone());
+        if current_repo.as_ref() != Some(&repo_key) {
+            if current_repo.is_some() {
+                rows.push(repo_divider_row(&format!("{}/{}", pr.owner, pr.repo)));
+                row_idx += 1;
+            }
+            current_repo = Some(repo_key);
+        }
         let is_closed = matches!(pr.state.as_str(), "closed" | "merged" | "draft");
         if is_closed && !seen_closed {
             rows.push(sub_header_row("CLOSED / MERGED / DRAFT"));
@@ -203,10 +217,30 @@ fn sub_header_row(label: &str) -> Row<'static> {
     .height(1)
 }
 
+/// A dim divider row separating PR groups by repository.
+fn repo_divider_row(label: &str) -> Row<'static> {
+    Row::new(vec![
+        Cell::from(""),
+        Cell::from(""),
+        Cell::from(""),
+        Cell::from(Span::styled(
+            format!("╶ {label}"),
+            Style::default().fg(Palette::BORDER),
+        )),
+    ])
+    .height(1)
+}
+
 /// Build the status cell for a PR: state glyph plus extra review icons.
 fn pr_status_spans(pr: &crate::gql::PullRequest) -> Vec<Span<'static>> {
     let (g, c) = widgets::pr_state_glyph(&pr.state);
     let mut spans = vec![Span::styled(g.to_string(), Style::default().fg(c))];
+    if pr.approved {
+        spans.push(Span::styled(
+            Glyph::STATUS_DONE.to_string(),
+            Style::default().fg(Palette::DONE),
+        ));
+    }
     if pr.changes_requested {
         spans.push(Span::styled("!", Style::default().fg(Palette::BLOCKED)));
     }
@@ -215,6 +249,12 @@ fn pr_status_spans(pr: &crate::gql::PullRequest) -> Vec<Span<'static>> {
     }
     if pr.merge_conflicts {
         spans.push(Span::styled("✗", Style::default().fg(Palette::BLOCKED)));
+    }
+    if pr.actions_failing {
+        spans.push(Span::styled(
+            Glyph::ACTIONS_FAILING.to_string(),
+            Style::default().fg(Palette::BLOCKED),
+        ));
     }
     if pr.review_requested {
         spans.push(Span::styled(
@@ -502,8 +542,8 @@ mod render_tests {
         app.data.pulls = vec![
             crate::gql::PullRequest {
                 id: 1,
-                owner: "o".into(),
-                repo: "r".into(),
+                owner: "owner".into(),
+                repo: "repo".into(),
                 number: 1,
                 title: "ClosedOne".into(),
                 url: "x".into(),
@@ -514,6 +554,8 @@ mod render_tests {
                 changes_requested: false,
                 copilot_comments: false,
                 merge_conflicts: false,
+                approved: false,
+                actions_failing: false,
                 dismissed_at: None,
                 remote_updated_at: None,
             },
@@ -537,8 +579,8 @@ mod render_tests {
             make_pr(1, None),
             crate::gql::PullRequest {
                 id: 2,
-                owner: "o".into(),
-                repo: "r".into(),
+                owner: "owner".into(),
+                repo: "repo".into(),
                 number: 2,
                 title: "ClosedOne".into(),
                 url: "x".into(),
@@ -549,6 +591,8 @@ mod render_tests {
                 changes_requested: false,
                 copilot_comments: false,
                 merge_conflicts: false,
+                approved: false,
+                actions_failing: false,
                 dismissed_at: None,
                 remote_updated_at: None,
             },
@@ -604,6 +648,60 @@ mod render_tests {
         assert!(
             !buffer.contains("PROJ-2"),
             "non-matching Linear should be hidden"
+        );
+    }
+
+    #[test]
+    fn test_inbox_renders_repo_dividers() {
+        let mut app = App::default();
+        app.data.pulls = vec![
+            crate::gql::PullRequest {
+                id: 1,
+                owner: "owner-a".into(),
+                repo: "repo-x".into(),
+                number: 1,
+                title: "PR #1".into(),
+                url: "x".into(),
+                author: None,
+                state: "open".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                approved: false,
+                actions_failing: false,
+                dismissed_at: None,
+                remote_updated_at: None,
+            },
+            crate::gql::PullRequest {
+                id: 2,
+                owner: "owner-b".into(),
+                repo: "repo-y".into(),
+                number: 2,
+                title: "PR #2".into(),
+                url: "x".into(),
+                author: None,
+                state: "open".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                approved: false,
+                actions_failing: false,
+                dismissed_at: None,
+                remote_updated_at: None,
+            },
+        ];
+        let buffer = render_inbox(&mut app);
+        assert!(
+            buffer.contains("owner-a/repo-x"),
+            "first repo should appear in buffer:\n{buffer}"
+        );
+        assert!(
+            buffer.contains("╶ owner-b/repo-y"),
+            "second repo divider should appear with prefix:\n{buffer}"
         );
     }
 }

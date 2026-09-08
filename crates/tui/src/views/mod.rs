@@ -970,5 +970,10 @@ mod fidelity_tests {
             !pr.merge_conflicts,
             "merge_conflicts should default to false"
         );
+        assert!(!pr.approved, "approved should default to false");
+        assert!(
+            !pr.actions_failing,
+            "actions_failing should default to false"
+        );
     }
 }

@@ -67,6 +67,8 @@ impl Glyph {
     pub const BAR_EMPTY: char = '░'; // U+2591
 
     pub const REVIEW_ARROW: char = '◂'; // picked-date prefix
+
+    pub const ACTIONS_FAILING: char = '⚑'; // U+2691
 }
 
 /// Relational suffixes on link badges (text, not glyphs).
