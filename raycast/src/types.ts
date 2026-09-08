@@ -66,6 +66,8 @@ export interface PullRequest {
   state: PrState;
   reviewRequested: boolean;
   authoredByMe: boolean;
+  approved: boolean;
+  actionsFailing: boolean;
   remoteCreatedAt: string | null;
   remoteUpdatedAt: string | null;
   syncedAt: string;

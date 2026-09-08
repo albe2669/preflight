@@ -300,6 +300,8 @@ function PrRow({ pr, onDone }: { pr: PullRequest; onDone: () => void }) {
   ];
   if (pr.reviewRequested) accessories.push({ icon: Icon.Eye, tooltip: "Review requested" });
   if (pr.authoredByMe) accessories.push({ icon: Icon.Person, tooltip: "Authored by me" });
+  if (pr.approved) accessories.push({ icon: Icon.Check, tooltip: "Approved" });
+  if (pr.actionsFailing) accessories.push({ icon: Icon.Warning, tooltip: "Actions failing" });
   if (pr.dismissedAt) accessories.push({ icon: Icon.MinusCircle, tooltip: "Dismissed" });
 
   return (

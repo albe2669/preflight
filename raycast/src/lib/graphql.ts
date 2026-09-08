@@ -149,7 +149,7 @@ export async function fetchPullRequests(): Promise<PullRequest[]> {
   const data = await request<{ pullRequest: Connection<PullRequest> }>(
     `{ pullRequest { nodes {
       id provider owner repo number title url author state
-      reviewRequested authoredByMe remoteCreatedAt remoteUpdatedAt syncedAt dismissedAt
+      reviewRequested authoredByMe approved actionsFailing remoteCreatedAt remoteUpdatedAt syncedAt dismissedAt
     } } }`,
   );
   return data.pullRequest.nodes;
