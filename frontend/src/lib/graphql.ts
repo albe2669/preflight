@@ -96,7 +96,7 @@ const EVENT_FIELDS = `
 const PR_FIELDS = `
   id provider owner repo number title url author state
   reviewRequested authoredByMe
-  changesRequested copilotComments mergeConflicts
+  changesRequested copilotComments mergeConflicts approved actionsFailing
   remoteCreatedAt remoteUpdatedAt syncedAt dismissedAt
 `
 

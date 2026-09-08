@@ -241,6 +241,8 @@ function PrRow({ pr, dismissed }: { pr: PullRequest; dismissed?: boolean }) {
             changesRequested={pr.changesRequested}
             copilotComments={pr.copilotComments}
             mergeConflicts={pr.mergeConflicts}
+            approved={pr.approved}
+            actionsFailing={pr.actionsFailing}
           />
         </div>
         <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">

@@ -1,4 +1,4 @@
-import { AlertCircle, Bot, GitMerge, Inbox, Loader2 } from "lucide-react"
+import { AlertCircle, Bot, GitMerge, Inbox, Loader2, Check, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { statusMeta, RELATION_META, PR_REVIEW_STATUS_META } from "@/lib/status"
@@ -84,17 +84,23 @@ const PR_STATUS_ICONS = {
   changesRequested: { Icon: AlertCircle, ...PR_REVIEW_STATUS_META.changesRequested },
   copilotComments: { Icon: Bot, ...PR_REVIEW_STATUS_META.copilotComments },
   mergeConflicts: { Icon: GitMerge, ...PR_REVIEW_STATUS_META.mergeConflicts },
+  approved: { Icon: Check, ...PR_REVIEW_STATUS_META.approved },
+  actionsFailing: { Icon: AlertTriangle, ...PR_REVIEW_STATUS_META.actionsFailing },
 } as const
 
 export function PrStatusIcons({
   changesRequested,
   copilotComments,
   mergeConflicts,
+  approved,
+  actionsFailing,
   className,
 }: {
   changesRequested?: boolean
   copilotComments?: boolean
   mergeConflicts?: boolean
+  approved?: boolean
+  actionsFailing?: boolean
   className?: string
 }) {
   return (
@@ -102,6 +108,8 @@ export function PrStatusIcons({
       {changesRequested && <PR_STATUS_ICONS.changesRequested.Icon className={cn("size-3", PR_STATUS_ICONS.changesRequested.color)} />}
       {copilotComments && <PR_STATUS_ICONS.copilotComments.Icon className={cn("size-3", PR_STATUS_ICONS.copilotComments.color)} />}
       {mergeConflicts && <PR_STATUS_ICONS.mergeConflicts.Icon className={cn("size-3", PR_STATUS_ICONS.mergeConflicts.color)} />}
+      {approved && <PR_STATUS_ICONS.approved.Icon className={cn("size-3", PR_STATUS_ICONS.approved.color)} />}
+      {actionsFailing && <PR_STATUS_ICONS.actionsFailing.Icon className={cn("size-3", PR_STATUS_ICONS.actionsFailing.color)} />}
     </span>
   )
 }
