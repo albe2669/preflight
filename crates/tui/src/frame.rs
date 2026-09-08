@@ -239,18 +239,19 @@ fn status_hints(app: &App) -> String {
 }
 
 fn sync_indicator(app: &App) -> String {
-    let any_syncing = app
-        .data
-        .sync
-        .iter()
-        .any(|s| s.last_status == "syncing" || s.last_status == "in_progress");
+    let any_syncing = !app.syncing.is_empty()
+        || app
+            .data
+            .sync
+            .iter()
+            .any(|s| s.last_status == "syncing" || s.last_status == "in_progress");
     if any_syncing {
         let frame = Glyph::SPINNER[(app.spinner / 2) as usize % Glyph::SPINNER.len()];
         return format!(" {frame} ");
     }
     // last good sync, "↻ 3m"
     if let Some(s) = app.data.sync.first() {
-        if let Some(ref ts) = s.last_synced_at {
+        if let Some(ts) = &s.last_synced_at {
             let rel = crate::app::relative_time(ts, chrono::Utc::now());
             return format!(" {} ", rel);
         }
@@ -295,6 +296,7 @@ fn weekday(d: chrono::NaiveDate) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::sync_indicator;
     use crate::app::{App, Mode, SidebarField};
 
     // -- status_hints tests --
@@ -354,6 +356,30 @@ mod tests {
         assert!(
             hints.contains("enter save field"),
             "active sidebar should hint how to save a field: {hints}"
+        );
+    }
+
+    #[test]
+    fn test_sync_indicator_shows_spinner_when_syncing() {
+        use std::collections::HashSet;
+        let app = App {
+            syncing: HashSet::from(["github".to_string()]),
+            ..Default::default()
+        };
+        let indicator = sync_indicator(&app);
+        assert!(
+            !indicator.is_empty(),
+            "sync indicator should show spinner when syncing: {indicator:?}"
+        );
+    }
+
+    #[test]
+    fn test_sync_indicator_empty_when_idle() {
+        let app = App::default();
+        let indicator = sync_indicator(&app);
+        assert!(
+            indicator.is_empty(),
+            "sync indicator should be empty when idle: {indicator:?}"
         );
     }
 }

@@ -356,7 +356,7 @@ fn linear_is_done(state_type: &str) -> bool {
 }
 
 /// Case-insensitive substring test against a PR's number (as text) or title.
-fn pr_matches_search(pr: &crate::gql::PullRequest, search: &str) -> bool {
+pub(crate) fn pr_matches_search(pr: &crate::gql::PullRequest, search: &str) -> bool {
     if search.is_empty() {
         return true;
     }
@@ -367,7 +367,7 @@ fn pr_matches_search(pr: &crate::gql::PullRequest, search: &str) -> bool {
 }
 
 /// Case-insensitive substring test against a Linear issue's identifier or title.
-fn linear_matches_search(li: &crate::gql::LinearIssue, search: &str) -> bool {
+pub(crate) fn linear_matches_search(li: &crate::gql::LinearIssue, search: &str) -> bool {
     if search.is_empty() {
         return true;
     }
@@ -376,12 +376,28 @@ fn linear_matches_search(li: &crate::gql::LinearIssue, search: &str) -> bool {
 }
 
 /// Filtered + sorted PR candidate indices for the link attach picker.
-/// Open PRs come first, closed/merged after; ties keep source order.
+/// Open PRs come first, closed/merged after; within each group, most recently
+/// updated first. PRs with unknown update time sort last in their group.
 pub(crate) fn pr_picker_candidates(app: &crate::app::App, search: &str) -> Vec<usize> {
     let mut idxs: Vec<usize> = (0..app.data.pulls.len())
         .filter(|&i| pr_matches_search(&app.data.pulls[i], search))
         .collect();
-    idxs.sort_by_key(|&i| pr_is_closed(&app.data.pulls[i].state));
+    idxs.sort_by(|&a, &b| {
+        let pa = &app.data.pulls[a];
+        let pb = &app.data.pulls[b];
+        pr_is_closed(&pa.state)
+            .cmp(&pr_is_closed(&pb.state))
+            .then_with(|| {
+                let ta = pa.remote_updated_at.as_deref();
+                let tb = pb.remote_updated_at.as_deref();
+                match (ta, tb) {
+                    (Some(a), Some(b)) => b.cmp(a),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            })
+    });
     idxs
 }
 
@@ -512,7 +528,7 @@ mod tests {
         use crate::test_support::buffer_text;
         use ratatui::{Terminal, backend::TestBackend};
 
-        let mut app = App {
+        let app = App {
             mode: Mode::Command {
                 input: "backlog".into(),
                 selection: 0,
@@ -530,5 +546,112 @@ mod tests {
             text.contains("backlog"),
             "single filtered result must be visible in the palette:\n{text}"
         );
+    }
+
+    #[test]
+    fn test_pr_picker_sorts_open_first_then_recency() {
+        use crate::app::App;
+
+        let mut app = App::default();
+        app.data.pulls = vec![
+            crate::gql::PullRequest {
+                id: 1,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 1,
+                title: "Closed old".into(),
+                url: "x".into(),
+                author: None,
+                state: "closed".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                dismissed_at: None,
+                remote_updated_at: Some("2024-01-01T00:00:00Z".into()),
+            },
+            crate::gql::PullRequest {
+                id: 2,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 2,
+                title: "Open new".into(),
+                url: "x".into(),
+                author: None,
+                state: "open".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                dismissed_at: None,
+                remote_updated_at: Some("2024-06-01T00:00:00Z".into()),
+            },
+            crate::gql::PullRequest {
+                id: 3,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 3,
+                title: "Open older".into(),
+                url: "x".into(),
+                author: None,
+                state: "open".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                dismissed_at: None,
+                remote_updated_at: Some("2024-03-01T00:00:00Z".into()),
+            },
+        ];
+        let result = pr_picker_candidates(&app, "");
+        assert_eq!(result, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn test_pr_picker_none_updated_sorts_last() {
+        use crate::app::App;
+
+        let mut app = App::default();
+        app.data.pulls = vec![
+            crate::gql::PullRequest {
+                id: 1,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 1,
+                title: "Open no date".into(),
+                url: "x".into(),
+                author: None,
+                state: "open".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                dismissed_at: None,
+                remote_updated_at: None,
+            },
+            crate::gql::PullRequest {
+                id: 2,
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 2,
+                title: "Open with date".into(),
+                url: "x".into(),
+                author: None,
+                state: "open".into(),
+                review_requested: false,
+                authored_by_me: false,
+                changes_requested: false,
+                copilot_comments: false,
+                merge_conflicts: false,
+                dismissed_at: None,
+                remote_updated_at: Some("2024-06-01T00:00:00Z".into()),
+            },
+        ];
+        let result = pr_picker_candidates(&app, "");
+        assert_eq!(result, vec![1, 0]);
     }
 }

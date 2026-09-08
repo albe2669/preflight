@@ -90,6 +90,8 @@ pub struct PullRequest {
     pub merge_conflicts: bool,
     #[cynic(rename = "dismissedAt")]
     pub dismissed_at: Option<String>,
+    #[cynic(rename = "remoteUpdatedAt")]
+    pub remote_updated_at: Option<String>,
 }
 
 #[derive(cynic::QueryFragment, Clone, Debug)]

@@ -38,6 +38,13 @@ pub(crate) enum AppMsg {
     },
     Toast(ToastKind, String),
     Refresh,
+    SyncStarted {
+        source: String,
+    },
+    SyncDone {
+        source: String,
+        success: bool,
+    },
 }
 
 /// The five top-level views plus the detail overlay.
@@ -241,6 +248,7 @@ pub struct App {
     pub(crate) generation: u64,
     pub(crate) filter: String,
     pub(crate) quit_requested: bool,
+    pub(crate) syncing: HashSet<String>,
 }
 
 /// Lazy-loaded data for the detail overlay.
@@ -276,8 +284,9 @@ impl Default for App {
             client: crate::gql::Client::new("http://127.0.0.1:0"),
             tx: None,
             generation: 0,
-            filter: String::new(),
             quit_requested: false,
+            filter: String::new(),
+            syncing: HashSet::new(),
         }
     }
 }
@@ -323,6 +332,18 @@ impl App {
             }
             AppMsg::Toast(k, m) => self.set_toast(k, m),
             AppMsg::Refresh => self.spawn_refresh(),
+            AppMsg::SyncStarted { source } => {
+                self.syncing.insert(source);
+            }
+            AppMsg::SyncDone { source, success } => {
+                self.syncing.remove(&source);
+                if success {
+                    self.set_toast(ToastKind::Success, format!("{} synced", source));
+                } else {
+                    self.set_toast(ToastKind::Error, format!("{} sync failed", source));
+                }
+                self.spawn_refresh();
+            }
         }
     }
 }
@@ -636,6 +657,7 @@ pub(crate) mod tests {
             merge_conflicts: false,
             authored_by_me: false,
             dismissed_at: dismissed_at.map(|s| s.to_string()),
+            remote_updated_at: None,
         }
     }
 
@@ -955,6 +977,7 @@ pub(crate) mod tests {
                 merge_conflicts: false,
                 authored_by_me: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
             crate::gql::PullRequest {
                 id: 3,
@@ -971,6 +994,7 @@ pub(crate) mod tests {
                 merge_conflicts: false,
                 authored_by_me: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
             crate::gql::PullRequest {
                 id: 4,
@@ -987,6 +1011,7 @@ pub(crate) mod tests {
                 merge_conflicts: false,
                 authored_by_me: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
         ];
 
@@ -1530,5 +1555,47 @@ pub(crate) mod tests {
             app.detail_loaded_id, None,
             "non-todo view should not trigger detail fetch"
         );
+    }
+
+    #[test]
+    fn test_sync_started_inserts_into_syncing() {
+        let mut app = App::default();
+        app.handle_msg(AppMsg::SyncStarted {
+            source: "github".into(),
+        });
+        assert!(app.syncing.contains("github"));
+        assert_eq!(app.syncing.len(), 1);
+    }
+
+    #[test]
+    fn test_sync_done_success_removes_and_toasts() {
+        let mut app = App::default();
+        app.handle_msg(AppMsg::SyncStarted {
+            source: "github".into(),
+        });
+        app.handle_msg(AppMsg::SyncDone {
+            source: "github".into(),
+            success: true,
+        });
+        assert!(!app.syncing.contains("github"));
+        let toast = app.toast.expect("success should set a toast");
+        assert_eq!(toast.kind, ToastKind::Success);
+        assert!(toast.message.contains("github synced"));
+    }
+
+    #[test]
+    fn test_sync_done_failure_removes_and_error_toasts() {
+        let mut app = App::default();
+        app.handle_msg(AppMsg::SyncStarted {
+            source: "linear".into(),
+        });
+        app.handle_msg(AppMsg::SyncDone {
+            source: "linear".into(),
+            success: false,
+        });
+        assert!(!app.syncing.contains("linear"));
+        let toast = app.toast.expect("failure should set a toast");
+        assert_eq!(toast.kind, ToastKind::Error);
+        assert!(toast.message.contains("sync failed"));
     }
 }

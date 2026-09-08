@@ -361,22 +361,48 @@ impl App {
 
     pub(crate) fn spawn_sync_github(&self) {
         let Some(tx) = &self.tx else { return };
+        let _ = tx.try_send(AppMsg::SyncStarted {
+            source: "github".into(),
+        });
         let client = self.client.clone();
         let tx = tx.clone();
         tokio::spawn(async move {
-            if client.sync_github().await.is_ok() {
-                let _ = tx.send(AppMsg::Refresh).await;
+            let result = client.sync_github().await;
+            let success = result.is_ok();
+            let _ = tx
+                .send(AppMsg::SyncDone {
+                    source: "github".into(),
+                    success,
+                })
+                .await;
+            if let Err(e) = result {
+                let _ = tx
+                    .send(AppMsg::Toast(ToastKind::Error, e.to_string()))
+                    .await;
             }
         });
     }
 
     pub(crate) fn spawn_sync_linear(&self) {
         let Some(tx) = &self.tx else { return };
+        let _ = tx.try_send(AppMsg::SyncStarted {
+            source: "linear".into(),
+        });
         let client = self.client.clone();
         let tx = tx.clone();
         tokio::spawn(async move {
-            if client.sync_linear().await.is_ok() {
-                let _ = tx.send(AppMsg::Refresh).await;
+            let result = client.sync_linear().await;
+            let success = result.is_ok();
+            let _ = tx
+                .send(AppMsg::SyncDone {
+                    source: "linear".into(),
+                    success,
+                })
+                .await;
+            if let Err(e) = result {
+                let _ = tx
+                    .send(AppMsg::Toast(ToastKind::Error, e.to_string()))
+                    .await;
             }
         });
     }
@@ -391,12 +417,39 @@ impl App {
 
     pub(crate) fn spawn_sync_all(&self) {
         let Some(tx) = &self.tx else { return };
+        let _ = tx.try_send(AppMsg::SyncStarted {
+            source: "linear".into(),
+        });
+        let _ = tx.try_send(AppMsg::SyncStarted {
+            source: "github".into(),
+        });
         let client = self.client.clone();
         let tx = tx.clone();
         tokio::spawn(async move {
-            let _ = client.sync_linear().await;
-            let _ = client.sync_github().await;
-            let _ = tx.send(AppMsg::Refresh).await;
+            let lin = client.sync_linear().await;
+            let _ = tx
+                .send(AppMsg::SyncDone {
+                    source: "linear".into(),
+                    success: lin.is_ok(),
+                })
+                .await;
+            if let Err(e) = lin {
+                let _ = tx
+                    .send(AppMsg::Toast(ToastKind::Error, e.to_string()))
+                    .await;
+            }
+            let gh = client.sync_github().await;
+            let _ = tx
+                .send(AppMsg::SyncDone {
+                    source: "github".into(),
+                    success: gh.is_ok(),
+                })
+                .await;
+            if let Err(e) = gh {
+                let _ = tx
+                    .send(AppMsg::Toast(ToastKind::Error, e.to_string()))
+                    .await;
+            }
         });
     }
 

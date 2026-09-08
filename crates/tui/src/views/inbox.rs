@@ -13,13 +13,25 @@ use crate::theme::{Glyph, Palette};
 use crate::widgets;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
-    let prs = app.inbox_prs();
-    let linears = app.inbox_linears();
+    let filter = match &app.mode {
+        Mode::Filter { input, .. } => input.clone(),
+        _ => app.filter.clone(),
+    };
+    let prs: Vec<&crate::gql::PullRequest> = app
+        .inbox_prs()
+        .into_iter()
+        .filter(|p| crate::views::overlays::pr_matches_search(p, &filter))
+        .collect();
+    let linears: Vec<&crate::gql::LinearIssue> = app
+        .inbox_linears()
+        .into_iter()
+        .filter(|l| crate::views::overlays::linear_matches_search(l, &filter))
+        .collect();
 
     let pr_sync = app.sync_by_source("github");
-    let pr_sync_label = sync_label(pr_sync, app.spinner);
+    let pr_sync_label = sync_label(pr_sync, app.spinner, app.syncing.contains("github"));
     let lin_sync = app.sync_by_source("linear");
-    let lin_sync_label = sync_label(lin_sync, app.spinner);
+    let lin_sync_label = sync_label(lin_sync, app.spinner, app.syncing.contains("linear"));
 
     let header = Row::new(vec![
         Cell::from(Span::styled(
@@ -147,7 +159,11 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 /// Sync-state label for a group header.
-fn sync_label(sync: Option<&crate::gql::SyncState>, spinner: u8) -> String {
+fn sync_label(sync: Option<&crate::gql::SyncState>, spinner: u8, syncing: bool) -> String {
+    if syncing {
+        let frame = Glyph::SPINNER[(spinner / 2) as usize % Glyph::SPINNER.len()];
+        return format!("{} syncing…", frame);
+    }
     match sync {
         Some(s) if s.last_status == "syncing" || s.last_status == "in_progress" => {
             let frame = Glyph::SPINNER[(spinner / 2) as usize % Glyph::SPINNER.len()];
@@ -366,6 +382,12 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
                 app.mode = m;
             }
         }
+        KeyCode::Char('/') => {
+            app.mode = Mode::Filter {
+                input: String::new(),
+                caret: 0,
+            };
+        }
         _ => {}
     }
 }
@@ -493,6 +515,7 @@ mod render_tests {
                 copilot_comments: false,
                 merge_conflicts: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
             make_pr(2, None),
         ];
@@ -527,6 +550,7 @@ mod render_tests {
                 copilot_comments: false,
                 merge_conflicts: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
         ];
         let buffer = render_inbox(&mut app);
@@ -546,6 +570,40 @@ mod render_tests {
         assert!(
             !buffer.contains("hidden"),
             "header should not show hidden count when show_closed is true"
+        );
+    }
+
+    #[test]
+    fn test_inbox_render_filter_narrows_prs() {
+        use crate::app::Mode;
+        let mut app = App::default();
+        app.data.pulls = vec![make_pr(1, None), make_pr(2, None)];
+        app.mode = Mode::Filter {
+            input: "#1".into(),
+            caret: 2,
+        };
+        let buffer = render_inbox(&mut app);
+        assert!(buffer.contains("PR #1"), "matching PR should appear");
+        assert!(
+            !buffer.contains("PR #2"),
+            "non-matching PR should be hidden"
+        );
+    }
+
+    #[test]
+    fn test_inbox_render_filter_narrows_linears() {
+        use crate::app::Mode;
+        let mut app = App::default();
+        app.data.linears = vec![make_linear(1, None), make_linear(2, None)];
+        app.mode = Mode::Filter {
+            input: "PROJ-1".into(),
+            caret: 6,
+        };
+        let buffer = render_inbox(&mut app);
+        assert!(buffer.contains("PROJ-1"), "matching Linear should appear");
+        assert!(
+            !buffer.contains("PROJ-2"),
+            "non-matching Linear should be hidden"
         );
     }
 }
@@ -1007,5 +1065,12 @@ mod navigate_tests {
             !app.show_closed,
             "D should toggle show_closed back to false"
         );
+    }
+    #[test]
+    fn test_inbox_filter_mode_activates() {
+        let mut app = App::default();
+        app.view = crate::app::View::Inbox;
+        super::handle_navigate(&mut app, KeyCode::Char('/'));
+        assert!(matches!(app.mode, Mode::Filter { .. }));
     }
 }

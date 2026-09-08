@@ -39,20 +39,28 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             Span::raw(" ")
         };
 
-        let state_label = match s.last_status.as_str() {
-            "syncing" | "in_progress" => {
-                let frame = Glyph::SPINNER[(app.spinner / 2) as usize % Glyph::SPINNER.len()];
-                Span::styled(
-                    format!("{} syncing…", frame),
-                    Style::default().fg(Palette::ACCENT),
-                )
+        let state_label = if app.syncing.contains(&s.source) {
+            let frame = Glyph::SPINNER[(app.spinner / 2) as usize % Glyph::SPINNER.len()];
+            Span::styled(
+                format!("{} syncing…", frame),
+                Style::default().fg(Palette::ACCENT),
+            )
+        } else {
+            match s.last_status.as_str() {
+                "syncing" | "in_progress" => {
+                    let frame = Glyph::SPINNER[(app.spinner / 2) as usize % Glyph::SPINNER.len()];
+                    Span::styled(
+                        format!("{} syncing…", frame),
+                        Style::default().fg(Palette::ACCENT),
+                    )
+                }
+                "ok" | "success" => Span::styled("↻ ok", Style::default().fg(Palette::DONE)),
+                "error" => Span::styled("▲ error", Style::default().fg(Palette::BLOCKED)),
+                "no_token" | "offline" => {
+                    Span::styled("⌀ no token", Style::default().fg(Palette::GHOST))
+                }
+                other => Span::styled(other.to_string(), Style::default().fg(Palette::DIM)),
             }
-            "ok" | "success" => Span::styled("↻ ok", Style::default().fg(Palette::DONE)),
-            "error" => Span::styled("▲ error", Style::default().fg(Palette::BLOCKED)),
-            "no_token" | "offline" => {
-                Span::styled("⌀ no token", Style::default().fg(Palette::GHOST))
-            }
-            other => Span::styled(other.to_string(), Style::default().fg(Palette::DIM)),
         };
 
         let last = s

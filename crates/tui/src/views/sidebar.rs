@@ -3317,6 +3317,7 @@ mod sidebar_add_tests {
                 copilot_comments: false,
                 merge_conflicts: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
         ];
         enter_sidebar_add(&mut app);
@@ -3365,6 +3366,7 @@ mod sidebar_add_tests {
                 copilot_comments: false,
                 merge_conflicts: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
             crate::gql::PullRequest {
                 id: 2,
@@ -3381,6 +3383,7 @@ mod sidebar_add_tests {
                 copilot_comments: false,
                 merge_conflicts: false,
                 dismissed_at: None,
+                remote_updated_at: None,
             },
         ];
         enter_sidebar_add(&mut app);
