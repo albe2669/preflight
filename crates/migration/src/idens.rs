@@ -89,6 +89,8 @@ pub enum PullRequest {
     ChangesRequested,
     CopilotComments,
     MergeConflicts,
+    Approved,
+    ActionsFailing,
 }
 
 #[derive(DeriveIden)]
