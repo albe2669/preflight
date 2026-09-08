@@ -32,6 +32,8 @@ pub struct Model {
     pub changes_requested: bool,
     pub copilot_comments: bool,
     pub merge_conflicts: bool,
+    pub approved: bool,
+    pub actions_failing: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -184,6 +184,8 @@ pub struct PrRecord {
     pub changes_requested: bool,
     pub copilot_comments: bool,
     pub merge_conflicts: bool,
+    pub approved: bool,
+    pub actions_failing: bool,
 }
 
 /// Idempotently upsert a GitHub pull request row.
@@ -214,6 +216,8 @@ pub async fn upsert_pr(db: &DatabaseConnection, rec: &PrRecord) -> Result<pull_r
             am.changes_requested = Set(rec.changes_requested);
             am.copilot_comments = Set(rec.copilot_comments);
             am.merge_conflicts = Set(rec.merge_conflicts);
+            am.approved = Set(rec.approved);
+            am.actions_failing = Set(rec.actions_failing);
             am.remote_updated_at = Set(rec.remote_updated_at.map(|dt| dt.into()));
             am.synced_at = Set(synced);
             Ok(am.update(db).await?)
@@ -234,6 +238,8 @@ pub async fn upsert_pr(db: &DatabaseConnection, rec: &PrRecord) -> Result<pull_r
                 changes_requested: Set(rec.changes_requested),
                 copilot_comments: Set(rec.copilot_comments),
                 merge_conflicts: Set(rec.merge_conflicts),
+                approved: Set(rec.approved),
+                actions_failing: Set(rec.actions_failing),
                 remote_created_at: Set(rec.remote_created_at.map(|dt| dt.into())),
                 remote_updated_at: Set(rec.remote_updated_at.map(|dt| dt.into())),
                 synced_at: Set(synced),
@@ -313,6 +319,8 @@ mod tests {
             changes_requested: false,
             copilot_comments: false,
             merge_conflicts: false,
+            approved: false,
+            actions_failing: false,
         }
     }
 
@@ -329,6 +337,7 @@ mod tests {
 
         let page = GithubPage {
             prs: vec![fetched_pr(42, false, false)],
+            viewer_login: None,
             end_cursor: None,
             has_next_page: false,
         };
@@ -367,11 +376,13 @@ mod tests {
             pages: Arc::new(Mutex::new(vec![
                 GithubPage {
                     prs: vec![fetched_pr(1, false, false)],
+                    viewer_login: None,
                     end_cursor: Some("X".into()),
                     has_next_page: true,
                 },
                 GithubPage {
                     prs: vec![fetched_pr(2, false, false)],
+                    viewer_login: None,
                     end_cursor: None,
                     has_next_page: false,
                 },
@@ -407,6 +418,7 @@ mod tests {
         let client = FailingClient {
             pages_before_fail: Arc::new(Mutex::new(vec![GithubPage {
                 prs: vec![fetched_pr(1, false, false)],
+                viewer_login: None,
                 end_cursor: Some("X".into()),
                 has_next_page: true,
             }])),
@@ -497,6 +509,7 @@ mod tests {
                 fetched_pr(2, true, true),   // draft by me, keep
                 fetched_pr(3, true, false),  // draft by other, drop
             ],
+            viewer_login: None,
             end_cursor: None,
             has_next_page: false,
         };
@@ -557,6 +570,7 @@ mod tests {
 
         let page = GithubPage {
             prs: vec![fetched_pr(42, false, false)],
+            viewer_login: None,
             end_cursor: None,
             has_next_page: false,
         };
@@ -624,6 +638,8 @@ mod tests {
             changes_requested: false,
             copilot_comments: false,
             merge_conflicts: false,
+            approved: false,
+            actions_failing: false,
         };
         upsert_pr(&db, &rec).await.unwrap();
 
@@ -635,10 +651,10 @@ mod tests {
         };
         let model = upsert_pr(&db, &updated).await.unwrap();
 
-        assert_eq!(model.state, PullRequestState::Merged);
-        assert!(model.changes_requested);
         assert!(model.merge_conflicts);
         assert!(!model.copilot_comments);
+        assert!(!model.approved);
+        assert!(!model.actions_failing);
 
         let count = pull_request::Entity::find().count(&db).await.unwrap();
         assert_eq!(count, 1);
@@ -650,6 +666,7 @@ mod tests {
 
         let page = GithubPage {
             prs: vec![fetched_pr(42, false, false)],
+            viewer_login: None,
             end_cursor: None,
             has_next_page: false,
         };

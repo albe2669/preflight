@@ -35,6 +35,8 @@ pub struct FetchedPr {
     pub changes_requested: bool,
     pub copilot_comments: bool,
     pub merge_conflicts: bool,
+    pub approved: bool,
+    pub actions_failing: bool,
 }
 
 impl GithubFilter {
@@ -238,6 +240,8 @@ mod tests {
             changes_requested: false,
             copilot_comments: false,
             merge_conflicts: false,
+            approved: false,
+            actions_failing: false,
         }
     }
 
@@ -393,6 +397,8 @@ mod tests {
                 changes_requested: false,
                 copilot_comments: false,
                 merge_conflicts: false,
+                approved: false,
+                actions_failing: false,
             },
             FetchedPr {
                 repo_owner: "org".into(),
@@ -411,6 +417,8 @@ mod tests {
                 changes_requested: false,
                 copilot_comments: false,
                 merge_conflicts: false,
+                approved: false,
+                actions_failing: false,
             },
         ];
         let got = apply_team_exclusion(prs, &["ai-agents".into()]);
@@ -437,6 +445,8 @@ mod tests {
             changes_requested: false,
             copilot_comments: false,
             merge_conflicts: false,
+            approved: false,
+            actions_failing: false,
         }];
         let got = apply_team_exclusion(prs, &["ai-agents".into()]);
         assert_eq!(got.len(), 1);

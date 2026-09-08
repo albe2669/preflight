@@ -29,6 +29,7 @@ fn truncate_body(s: impl AsRef<str>) -> String {
 #[derive(Clone, Debug)]
 pub struct GithubPage {
     pub prs: Vec<FetchedPr>,
+    pub viewer_login: Option<String>,
     pub end_cursor: Option<String>,
     pub has_next_page: bool,
 }
@@ -46,9 +47,18 @@ pub trait GithubApiClient: Send + Sync {
 ///
 /// Returns `SchemaMismatch` when the JSON shape is not what we expect.
 pub(crate) fn parse_github_page(json: Value) -> Result<GithubPage> {
-    let data = json
+    let root_data = json
         .get("data")
-        .and_then(|v| v.get("search"))
+        .ok_or_else(|| GithubError::SchemaMismatch("missing data".into()))?;
+
+    let viewer_login = root_data
+        .get("viewer")
+        .and_then(|v| v.get("login"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let data = root_data
+        .get("search")
         .ok_or_else(|| GithubError::SchemaMismatch("missing data.search".into()))?;
 
     let page_info = data
@@ -155,11 +165,11 @@ pub(crate) fn parse_github_page(json: Value) -> Result<GithubPage> {
                     .ok()
             });
 
-        let changes_requested = node
-            .get("reviewDecision")
-            .and_then(|v| v.as_str())
-            .map(|s| s == "CHANGES_REQUESTED")
-            .unwrap_or(false);
+        let review_decision = node.get("reviewDecision").and_then(|v| v.as_str());
+
+        let changes_requested = review_decision == Some("CHANGES_REQUESTED");
+        let approved = review_decision == Some("APPROVED");
+        let review_requested = review_decision == Some("REVIEW_REQUIRED");
 
         let merge_conflicts = node
             .get("mergeable")
@@ -167,9 +177,32 @@ pub(crate) fn parse_github_page(json: Value) -> Result<GithubPage> {
             .map(|s| s == "CONFLICTING")
             .unwrap_or(false);
 
-        // ponytail: Copilot comment detection needs a review-author query we
-        // do not run yet; always false until that is added.
-        let copilot_comments = false;
+        let actions_failing = node
+            .get("statusCheckRollup")
+            .and_then(|v| v.get("state"))
+            .and_then(|v| v.as_str())
+            .map(|s| s == "ERROR" || s == "FAILURE")
+            .unwrap_or(false);
+
+        let copilot_comments = node
+            .get("reviews")
+            .and_then(|v| v.get("nodes"))
+            .and_then(|v| v.as_array())
+            .map(|nodes| {
+                nodes.iter().any(|n| {
+                    n.get("author")
+                        .and_then(|a| a.get("login"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_lowercase().contains("copilot"))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        let authored_by_me = match (&author_login, &viewer_login) {
+            (Some(a), Some(v)) => a == v,
+            _ => false,
+        };
 
         prs.push(FetchedPr {
             repo_owner,
@@ -180,19 +213,22 @@ pub(crate) fn parse_github_page(json: Value) -> Result<GithubPage> {
             author_login,
             state,
             is_draft,
-            review_requested: false,
+            review_requested,
             requested_reviewer_teams: Vec::new(),
-            authored_by_me: false,
+            authored_by_me,
             remote_created_at,
             remote_updated_at,
             changes_requested,
             copilot_comments,
             merge_conflicts,
+            approved,
+            actions_failing,
         });
     }
 
     Ok(GithubPage {
         prs,
+        viewer_login,
         end_cursor,
         has_next_page,
     })
@@ -225,6 +261,8 @@ pub(crate) fn fetched_to_record(f: &FetchedPr) -> crate::sync::PrRecord {
         changes_requested: f.changes_requested,
         copilot_comments: f.copilot_comments,
         merge_conflicts: f.merge_conflicts,
+        approved: f.approved,
+        actions_failing: f.actions_failing,
     }
 }
 
@@ -241,9 +279,9 @@ impl GithubApiClient for GithubApiClientImpl {
         use crate::error::map_response_error;
 
         let start = std::time::Instant::now();
-
         let graphql_query = r#"
             query($query: String!, $first: Int!, $after: String) {
+                viewer { login }
                 search(query: $query, first: $first, after: $after, type: ISSUE_ADVANCED) {
                     pageInfo {
                         endCursor
@@ -262,6 +300,8 @@ impl GithubApiClient for GithubApiClientImpl {
                             createdAt
                             updatedAt
                             repository { nameWithOwner }
+                            statusCheckRollup { state }
+                            reviews(first: 10) { nodes { author { login } } }
                         }
                     }
                 }
@@ -472,16 +512,22 @@ pub(crate) mod tests {
                     "title": format!("Fix #{i}"),
                     "url": format!("https://github.com/owner/repo/pull/{}", 40 + i),
                     "state": "OPEN",
+                    "isDraft": false,
+                    "reviewDecision": null,
+                    "mergeable": null,
                     "author": { "login": "alice" },
                     "createdAt": "2024-01-01T00:00:00Z",
                     "updatedAt": "2024-01-02T00:00:00Z",
-                    "repository": { "nameWithOwner": "owner/repo" }
+                    "repository": { "nameWithOwner": "owner/repo" },
+                    "statusCheckRollup": null,
+                    "reviews": { "nodes": [] }
                 })
             })
             .collect();
 
         serde_json::json!({
             "data": {
+                "viewer": { "login": "viewer" },
                 "search": {
                     "pageInfo": {
                         "endCursor": cursor,
@@ -541,6 +587,7 @@ pub(crate) mod tests {
     fn test_parse_github_page_null_author_is_ok() {
         let json = serde_json::json!({
             "data": {
+                "viewer": null,
                 "search": {
                     "pageInfo": { "endCursor": null, "hasNextPage": false },
                     "nodes": [{
@@ -551,7 +598,9 @@ pub(crate) mod tests {
                         "author": null,
                         "createdAt": "2024-01-01T00:00:00Z",
                         "updatedAt": "2024-01-02T00:00:00Z",
-                        "repository": { "nameWithOwner": "a/b" }
+                        "repository": { "nameWithOwner": "a/b" },
+                        "statusCheckRollup": null,
+                        "reviews": { "nodes": [] }
                     }]
                 }
             }
@@ -569,6 +618,7 @@ pub(crate) mod tests {
         ] {
             let json = serde_json::json!({
                 "data": {
+                    "viewer": null,
                     "search": {
                         "pageInfo": { "endCursor": null, "hasNextPage": false },
                         "nodes": [{
@@ -576,7 +626,9 @@ pub(crate) mod tests {
                             "state": state_str, "author": null,
                             "createdAt": "2024-01-01T00:00:00Z",
                             "updatedAt": "2024-01-01T00:00:00Z",
-                            "repository": { "nameWithOwner": "a/b" }
+                            "repository": { "nameWithOwner": "a/b" },
+                            "statusCheckRollup": null,
+                            "reviews": { "nodes": [] }
                         }]
                     }
                 }
@@ -593,6 +645,7 @@ pub(crate) mod tests {
     fn test_parse_github_page_unknown_state_returns_schema_mismatch() {
         let json = serde_json::json!({
             "data": {
+                "viewer": null,
                 "search": {
                     "pageInfo": { "endCursor": null, "hasNextPage": false },
                     "nodes": [{
@@ -600,7 +653,9 @@ pub(crate) mod tests {
                         "state": "UNKNOWN", "author": null,
                         "createdAt": "2024-01-01T00:00:00Z",
                         "updatedAt": "2024-01-01T00:00:00Z",
-                        "repository": { "nameWithOwner": "a/b" }
+                        "repository": { "nameWithOwner": "a/b" },
+                        "statusCheckRollup": null,
+                        "reviews": { "nodes": [] }
                     }]
                 }
             }
@@ -626,14 +681,16 @@ pub(crate) mod tests {
             "author": null,
             "createdAt": "2024-01-01T00:00:00Z",
             "updatedAt": "2024-01-01T00:00:00Z",
-            "repository": { "nameWithOwner": "a/b" }
+            "repository": { "nameWithOwner": "a/b" },
+            "statusCheckRollup": null,
+            "reviews": { "nodes": [] }
         })
     }
 
     #[test]
     fn test_parse_github_page_changes_requested_true() {
         let json = serde_json::json!({
-            "data": { "search": {
+            "data": { "viewer": null, "search": {
                 "pageInfo": { "endCursor": null, "hasNextPage": false },
                 "nodes": [pr_node("OPEN", false, Some("CHANGES_REQUESTED"), Some("MERGEABLE"))]
             }}
@@ -645,19 +702,20 @@ pub(crate) mod tests {
     #[test]
     fn test_parse_github_page_changes_requested_false_when_approved() {
         let json = serde_json::json!({
-            "data": { "search": {
+            "data": { "viewer": null, "search": {
                 "pageInfo": { "endCursor": null, "hasNextPage": false },
                 "nodes": [pr_node("OPEN", false, Some("APPROVED"), Some("MERGEABLE"))]
             }}
         });
         let page = parse_github_page(json).unwrap();
         assert!(!page.prs[0].changes_requested);
+        assert!(page.prs[0].approved);
     }
 
     #[test]
     fn test_parse_github_page_merge_conflicts_true() {
         let json = serde_json::json!({
-            "data": { "search": {
+            "data": { "viewer": null, "search": {
                 "pageInfo": { "endCursor": null, "hasNextPage": false },
                 "nodes": [pr_node("OPEN", false, None, Some("CONFLICTING"))]
             }}
@@ -669,7 +727,7 @@ pub(crate) mod tests {
     #[test]
     fn test_parse_github_page_merge_conflicts_false_when_mergeable() {
         let json = serde_json::json!({
-            "data": { "search": {
+            "data": { "viewer": null, "search": {
                 "pageInfo": { "endCursor": null, "hasNextPage": false },
                 "nodes": [pr_node("OPEN", false, None, Some("MERGEABLE"))]
             }}
@@ -681,7 +739,7 @@ pub(crate) mod tests {
     #[test]
     fn test_parse_github_page_draft_state_overrides_open() {
         let json = serde_json::json!({
-            "data": { "search": {
+            "data": { "viewer": null, "search": {
                 "pageInfo": { "endCursor": null, "hasNextPage": false },
                 "nodes": [pr_node("OPEN", true, None, None)]
             }}
@@ -694,9 +752,34 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_parse_github_page_copilot_comments_always_false() {
+    fn test_parse_github_page_copilot_comments_from_reviews() {
         let json = serde_json::json!({
-            "data": { "search": {
+            "data": { "viewer": null, "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [{
+                    "number": 1, "title": "t", "url": "https://x",
+                    "state": "OPEN", "isDraft": false,
+                    "reviewDecision": null, "mergeable": null,
+                    "author": null,
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "updatedAt": "2024-01-01T00:00:00Z",
+                    "repository": { "nameWithOwner": "a/b" },
+                    "statusCheckRollup": null,
+                    "reviews": { "nodes": [
+                        { "author": { "login": "github-copilot" } },
+                        { "author": { "login": "human" } }
+                    ]}
+                }]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].copilot_comments);
+    }
+
+    #[test]
+    fn test_parse_github_page_copilot_comments_false_without_copilot() {
+        let json = serde_json::json!({
+            "data": { "viewer": null, "search": {
                 "pageInfo": { "endCursor": null, "hasNextPage": false },
                 "nodes": [pr_node("OPEN", false, None, None)]
             }}
@@ -708,7 +791,7 @@ pub(crate) mod tests {
     #[test]
     fn test_parse_github_page_null_review_decision_and_mergeable() {
         let json = serde_json::json!({
-            "data": { "search": {
+            "data": { "viewer": null, "search": {
                 "pageInfo": { "endCursor": null, "hasNextPage": false },
                 "nodes": [pr_node("OPEN", false, None, None)]
             }}
@@ -737,6 +820,8 @@ pub(crate) mod tests {
             changes_requested: true,
             copilot_comments: false,
             merge_conflicts: true,
+            approved: false,
+            actions_failing: false,
         };
         let rec = fetched_to_record(&fetched);
         assert_eq!(rec.provider, "github");
@@ -751,6 +836,101 @@ pub(crate) mod tests {
         assert!(rec.changes_requested);
         assert!(!rec.copilot_comments);
         assert!(rec.merge_conflicts);
+        assert!(!rec.approved);
+        assert!(!rec.actions_failing);
+    }
+
+    #[test]
+    fn test_parse_github_page_approved_from_review_decision() {
+        let json = serde_json::json!({
+            "data": { "viewer": null, "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, Some("APPROVED"), Some("MERGEABLE"))]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].approved);
+    }
+
+    #[test]
+    fn test_parse_github_page_actions_failing_from_status_check() {
+        let json = serde_json::json!({
+            "data": { "viewer": null, "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [{
+                    "number": 1, "title": "t", "url": "https://x",
+                    "state": "OPEN", "isDraft": false,
+                    "reviewDecision": null, "mergeable": null,
+                    "author": null,
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "updatedAt": "2024-01-01T00:00:00Z",
+                    "repository": { "nameWithOwner": "a/b" },
+                    "statusCheckRollup": { "state": "FAILURE" },
+                    "reviews": { "nodes": [] }
+                }]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].actions_failing);
+    }
+
+    #[test]
+    fn test_parse_github_page_actions_failing_from_error_state() {
+        let json = serde_json::json!({
+            "data": { "viewer": null, "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [{
+                    "number": 1, "title": "t", "url": "https://x",
+                    "state": "OPEN", "isDraft": false,
+                    "reviewDecision": null, "mergeable": null,
+                    "author": null,
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "updatedAt": "2024-01-01T00:00:00Z",
+                    "repository": { "nameWithOwner": "a/b" },
+                    "statusCheckRollup": { "state": "ERROR" },
+                    "reviews": { "nodes": [] }
+                }]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].actions_failing);
+    }
+
+    #[test]
+    fn test_parse_github_page_authored_by_me() {
+        let json = serde_json::json!({
+            "data": {
+                "viewer": { "login": "alice" },
+                "search": {
+                    "pageInfo": { "endCursor": null, "hasNextPage": false },
+                    "nodes": [{
+                        "number": 1, "title": "t", "url": "https://x",
+                        "state": "OPEN", "isDraft": false,
+                        "reviewDecision": null, "mergeable": null,
+                        "author": { "login": "alice" },
+                        "createdAt": "2024-01-01T00:00:00Z",
+                        "updatedAt": "2024-01-01T00:00:00Z",
+                        "repository": { "nameWithOwner": "a/b" },
+                        "statusCheckRollup": null,
+                        "reviews": { "nodes": [] }
+                    }]
+                }
+            }
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].authored_by_me);
+    }
+
+    #[test]
+    fn test_parse_github_page_review_requested_from_review_decision() {
+        let json = serde_json::json!({
+            "data": { "viewer": null, "search": {
+                "pageInfo": { "endCursor": null, "hasNextPage": false },
+                "nodes": [pr_node("OPEN", false, Some("REVIEW_REQUIRED"), Some("MERGEABLE"))]
+            }}
+        });
+        let page = parse_github_page(json).unwrap();
+        assert!(page.prs[0].review_requested);
     }
 
     // parse_github_page only panics if it has an unreachable code path; all
@@ -838,6 +1018,7 @@ pub(crate) mod tests {
     async fn test_outbound_request_log_has_stats_and_no_body() {
         let response_body = serde_json::json!({
             "data": {
+                "viewer": { "login": "viewer" },
                 "search": {
                     "pageInfo": { "endCursor": "cur1", "hasNextPage": false },
                     "nodes": [
@@ -846,10 +1027,15 @@ pub(crate) mod tests {
                             "title": "Fix",
                             "url": "https://github.com/owner/repo/pull/40",
                             "state": "OPEN",
+                            "isDraft": false,
+                            "reviewDecision": null,
+                            "mergeable": null,
                             "author": { "login": "alice" },
                             "createdAt": "2024-01-01T00:00:00Z",
                             "updatedAt": "2024-01-02T00:00:00Z",
-                            "repository": { "nameWithOwner": "owner/repo" }
+                            "repository": { "nameWithOwner": "owner/repo" },
+                            "statusCheckRollup": null,
+                            "reviews": { "nodes": [] }
                         }
                     ]
                 }
