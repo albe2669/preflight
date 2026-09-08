@@ -502,6 +502,8 @@ type PullRequest {
   changesRequested: Boolean!
   copilotComments: Boolean!
   mergeConflicts: Boolean!
+  approved: Boolean!
+  actionsFailing: Boolean!
 }
 
 type PullRequestConnection {
