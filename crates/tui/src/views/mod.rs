@@ -28,13 +28,15 @@ pub fn render(f: &mut Frame, app: &mut App) {
     match app.view {
         View::Today => today::render(f, app, list_area),
         View::Backlog => backlog::render(f, app, list_area),
-        View::Inbox => inbox::render(f, app, content),
+        View::Inbox => inbox::render(f, app, list_area),
         View::Review => review::render(f, app, content),
         View::Sync => sync::render(f, app, content),
     }
     if let Some(sb) = sidebar_area {
         if matches!(app.view, View::Today | View::Backlog) {
             sidebar::render_info_sidebar(f, app, sb);
+        } else if app.view == View::Inbox {
+            inbox::render_legend_sidebar(f, sb);
         }
     }
 
@@ -194,6 +196,82 @@ const BACKLOG_KEYS: &[KeybindRow] = &[
         desc: "sidebar edit",
     },
 ];
+const INBOX_KEYS: &[KeybindRow] = &[
+    KeybindRow {
+        key: "j/k",
+        desc: "move cursor",
+    },
+    KeybindRow {
+        key: "o",
+        desc: "open in browser",
+    },
+    KeybindRow {
+        key: "C",
+        desc: "convert to todo",
+    },
+    KeybindRow {
+        key: "L",
+        desc: "link to todo",
+    },
+    KeybindRow {
+        key: "d",
+        desc: "dismiss PR",
+    },
+    KeybindRow {
+        key: "s",
+        desc: "sync group",
+    },
+    KeybindRow {
+        key: "D",
+        desc: "toggle closed/merged",
+    },
+    KeybindRow {
+        key: "/",
+        desc: "filter list",
+    },
+];
+const INBOX_LEGEND: &[KeybindRow] = &[
+    KeybindRow {
+        key: "◇",
+        desc: "open PR",
+    },
+    KeybindRow {
+        key: "◌",
+        desc: "draft PR",
+    },
+    KeybindRow {
+        key: "◆",
+        desc: "merged PR",
+    },
+    KeybindRow {
+        key: "⊗",
+        desc: "closed PR",
+    },
+    KeybindRow {
+        key: "⚑",
+        desc: "changes requested",
+    },
+    KeybindRow {
+        key: "c",
+        desc: "copilot comments",
+    },
+    KeybindRow {
+        key: "✗",
+        desc: "merge conflicts",
+    },
+    KeybindRow {
+        key: "!",
+        desc: "CI actions failing",
+    },
+    KeybindRow {
+        key: "?/·",
+        desc: "Linear triage/backlog",
+    },
+    KeybindRow {
+        key: "○/◐",
+        desc: "Linear unstarted/started",
+    },
+];
 const SIDEBAR_KEYS: &[KeybindRow] = &[
     KeybindRow {
         key: "Tab/j",
@@ -229,6 +307,14 @@ const HELP_SECTIONS: &[KeybindSection] = &[
     KeybindSection {
         title: "Backlog",
         rows: BACKLOG_KEYS,
+    },
+    KeybindSection {
+        title: "Inbox",
+        rows: INBOX_KEYS,
+    },
+    KeybindSection {
+        title: "Inbox legend",
+        rows: INBOX_LEGEND,
     },
     KeybindSection {
         title: "Sidebar edit",
@@ -453,11 +539,13 @@ mod tests {
     #[test]
     fn test_filter_keybinds_empty_returns_all() {
         let sections = filter_keybinds("");
-        assert_eq!(sections.len(), 4);
+        assert_eq!(sections.len(), 6);
         assert_eq!(sections[0].0, "Global");
         assert_eq!(sections[1].0, "Today");
         assert_eq!(sections[2].0, "Backlog");
-        assert_eq!(sections[3].0, "Sidebar edit");
+        assert_eq!(sections[3].0, "Inbox");
+        assert_eq!(sections[4].0, "Inbox legend");
+        assert_eq!(sections[5].0, "Sidebar edit");
     }
 
     #[test]
@@ -590,7 +678,7 @@ mod render_tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     fn render_full(app: &mut App) -> String {
-        let backend = TestBackend::new(120, 40);
+        let backend = TestBackend::new(120, 80);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| crate::views::render(f, app)).unwrap();
         buffer_text(terminal.backend().buffer())

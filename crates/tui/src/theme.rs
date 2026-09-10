@@ -68,7 +68,10 @@ impl Glyph {
 
     pub const REVIEW_ARROW: char = '◂'; // picked-date prefix
 
-    pub const ACTIONS_FAILING: char = '⚑'; // U+2691
+    pub const CHANGES_REQUESTED: char = '⚑'; // U+2691
+    pub const ACTIONS_FAILING: char = '!'; // U+0021
+    pub const COPILOT_COMMENTS: char = 'c';
+    pub const MERGE_CONFLICTS: char = '✗'; // U+2717
 }
 
 /// Relational suffixes on link badges (text, not glyphs).

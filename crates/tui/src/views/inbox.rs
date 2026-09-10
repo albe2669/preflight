@@ -105,9 +105,9 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             }
             current_repo = Some(repo_key);
         }
-        let is_closed = matches!(pr.state.as_str(), "closed" | "merged" | "draft");
+        let is_closed = matches!(pr.state.as_str(), "closed" | "merged");
         if is_closed && !seen_closed {
-            rows.push(sub_header_row("CLOSED / MERGED / DRAFT"));
+            rows.push(sub_header_row("CLOSED / MERGED"));
             row_idx += 1;
             seen_closed = true;
         }
@@ -170,6 +170,51 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let selected = cursor_to_row.get(app.cursor).copied();
     state.select(selected);
     f.render_stateful_widget(table, area, &mut state);
+}
+
+pub fn render_legend_sidebar(f: &mut Frame, area: Rect) {
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Palette::BORDER))
+        .title(Span::styled(" LEGEND ", Style::default().fg(Palette::DIM)));
+    f.render_widget(block, area);
+
+    let inner = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    );
+    if inner.height == 0 {
+        return;
+    }
+
+    let entries: &[(char, &str)] = &[
+        (Glyph::PR_OPEN, "open PR"),
+        (Glyph::PR_DRAFT, "draft PR"),
+        (Glyph::PR_MERGED, "merged PR"),
+        (Glyph::PR_CLOSED, "closed PR"),
+        (Glyph::STATUS_DONE, "approved"),
+        (Glyph::CHANGES_REQUESTED, "changes requested"),
+        (Glyph::COPILOT_COMMENTS, "copilot comments"),
+        (Glyph::MERGE_CONFLICTS, "merge conflicts"),
+        (Glyph::ACTIONS_FAILING, "CI actions failing"),
+        (Glyph::NEEDS_YOU, "needs your review"),
+        ('?', "Linear triage"),
+        ('·', "Linear backlog"),
+        (Glyph::STATUS_TODO, "Linear unstarted"),
+        (Glyph::STATUS_STARTED, "Linear started"),
+    ];
+    let mut lines: Vec<Line> = Vec::new();
+    for (glyph, desc) in entries {
+        lines.push(Line::from(vec![
+            Span::styled(glyph.to_string(), Style::default().fg(Palette::ACCENT)),
+            Span::raw(format!(" {desc}")),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Sync-state label for a group header.
@@ -242,13 +287,22 @@ fn pr_status_spans(pr: &crate::gql::PullRequest) -> Vec<Span<'static>> {
         ));
     }
     if pr.changes_requested {
-        spans.push(Span::styled("!", Style::default().fg(Palette::BLOCKED)));
+        spans.push(Span::styled(
+            Glyph::CHANGES_REQUESTED.to_string(),
+            Style::default().fg(Palette::BLOCKED),
+        ));
     }
     if pr.copilot_comments {
-        spans.push(Span::styled("c", Style::default().fg(Palette::ACCENT)));
+        spans.push(Span::styled(
+            Glyph::COPILOT_COMMENTS.to_string(),
+            Style::default().fg(Palette::ACCENT),
+        ));
     }
     if pr.merge_conflicts {
-        spans.push(Span::styled("✗", Style::default().fg(Palette::BLOCKED)));
+        spans.push(Span::styled(
+            Glyph::MERGE_CONFLICTS.to_string(),
+            Style::default().fg(Palette::BLOCKED),
+        ));
     }
     if pr.actions_failing {
         spans.push(Span::styled(
@@ -283,8 +337,20 @@ fn pr_row(pr: &crate::gql::PullRequest, is_cursor: bool) -> Row<'static> {
             Style::default().fg(Palette::GHOST),
         ));
     }
-    let row = Row::new(vec![
-        Cell::from(Line::from(pr_status_spans(pr))),
+    let mut status_spans = pr_status_spans(pr);
+    if is_cursor {
+        status_spans.insert(
+            0,
+            Span::styled(
+                Glyph::CURSOR.to_string(),
+                Style::default().fg(Palette::ACCENT),
+            ),
+        );
+    } else {
+        status_spans.insert(0, Span::raw(" "));
+    }
+    Row::new(vec![
+        Cell::from(Line::from(status_spans)),
         Cell::from(Span::styled(
             repo,
             Style::default().fg(if pr.dismissed_at.is_some() {
@@ -295,18 +361,22 @@ fn pr_row(pr: &crate::gql::PullRequest, is_cursor: bool) -> Row<'static> {
         )),
         Cell::from(Span::styled(author, Style::default().fg(Palette::DIM))),
         Cell::from(Line::from(title_spans)),
-    ]);
-    if is_cursor {
-        row.style(Style::default().bg(Palette::ROW_HIGHLIGHT))
-    } else {
-        row
-    }
+    ])
 }
 
 /// A Linear row: status icon, identifier, assignee, title.
 fn linear_row(li: &crate::gql::LinearIssue, is_cursor: bool) -> Row<'static> {
     let (g, c) = widgets::linear_state_glyph(&li.state_type);
-    let mut status = vec![Span::styled(g.to_string(), Style::default().fg(c))];
+    let mut status = vec![];
+    if is_cursor {
+        status.push(Span::styled(
+            Glyph::CURSOR.to_string(),
+            Style::default().fg(Palette::ACCENT),
+        ));
+    } else {
+        status.push(Span::raw(" "));
+    }
+    status.push(Span::styled(g.to_string(), Style::default().fg(c)));
     if li.assigned_to_me {
         status.push(Span::styled(
             Glyph::NEEDS_YOU.to_string(),
@@ -330,7 +400,7 @@ fn linear_row(li: &crate::gql::LinearIssue, is_cursor: bool) -> Row<'static> {
         Style::default().fg(Palette::DIM),
     ));
     let author = li.assignee_name.clone().unwrap_or_else(|| "—".to_string());
-    let row = Row::new(vec![
+    Row::new(vec![
         Cell::from(Line::from(status)),
         Cell::from(Span::styled(
             li.identifier.clone(),
@@ -342,12 +412,16 @@ fn linear_row(li: &crate::gql::LinearIssue, is_cursor: bool) -> Row<'static> {
         )),
         Cell::from(Span::styled(author, Style::default().fg(Palette::DIM))),
         Cell::from(Line::from(title_spans)),
-    ]);
-    if is_cursor {
-        row.style(Style::default().bg(Palette::ROW_HIGHLIGHT))
+    ])
+}
+
+fn open_url(url: &str) {
+    let cmd = if cfg!(target_os = "macos") {
+        "open"
     } else {
-        row
-    }
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(cmd).arg(url).spawn();
 }
 
 pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
@@ -392,13 +466,15 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
         KeyCode::Char('o') => {
             let prs = app.inbox_prs();
             let linears = app.inbox_linears();
-            if app.cursor < prs.len() {
-                app.set_toast(ToastKind::Success, prs[app.cursor].url.clone());
+            let url = if app.cursor < prs.len() {
+                Some(prs[app.cursor].url.clone())
             } else {
                 let li_idx = app.cursor - prs.len();
-                if let Some(li) = linears.get(li_idx) {
-                    app.set_toast(ToastKind::Success, li.url.clone());
-                }
+                linears.get(li_idx).map(|l| l.url.clone())
+            };
+            if let Some(url) = url {
+                open_url(&url);
+                app.set_toast(ToastKind::Success, format!("opened {url}"));
             }
         }
         KeyCode::Char('L') => {
@@ -702,6 +778,33 @@ mod render_tests {
         assert!(
             buffer.contains("╶ owner-b/repo-y"),
             "second repo divider should appear with prefix:\n{buffer}"
+        );
+    }
+
+    #[test]
+    fn test_inbox_legend_sidebar_renders() {
+        let mut app = App {
+            view: crate::app::View::Inbox,
+            ..Default::default()
+        };
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| crate::views::render(f, &mut app))
+            .unwrap();
+        let buffer = buffer_text(terminal.backend().buffer());
+
+        assert!(
+            buffer.contains("LEGEND"),
+            "legend sidebar title should appear"
+        );
+        assert!(
+            buffer.contains("open PR"),
+            "legend should describe the open PR glyph"
+        );
+        assert!(
+            buffer.contains("changes requested"),
+            "legend should describe the changes-requested glyph"
         );
     }
 }
