@@ -411,7 +411,7 @@ impl App {
             .filter(|p| self.show_dismissed || p.dismissed_at.is_none())
             .filter(|p| self.show_closed || !matches!(p.state.as_str(), "closed" | "merged"))
             .collect();
-        prs.sort_by_key(|p| matches!(p.state.as_str(), "closed" | "merged" | "draft"));
+        prs.sort_by_key(|p| matches!(p.state.as_str(), "closed" | "merged"));
         prs
     }
     /// Non-dismissed Linear issues. When `show_closed` is false,
