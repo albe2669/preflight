@@ -12,21 +12,43 @@ use crate::app::{App, Mode, ToastKind};
 use crate::theme::{Glyph, Palette};
 use crate::widgets;
 
-pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+/// PRs in the order the inbox table displays them: filtered by the active
+/// search, then sorted by (owner, repo). The state sort from `inbox_prs`
+/// (closed/merged last) is applied first, so the repo sort stays stable
+/// within open and closed groups — matching what `render` displays.
+fn inbox_display_prs(app: &App) -> Vec<&crate::gql::PullRequest> {
     let filter = match &app.mode {
         Mode::Filter { input, .. } => input.clone(),
         _ => app.filter.clone(),
     };
-    let prs: Vec<&crate::gql::PullRequest> = app
+    let mut prs: Vec<&crate::gql::PullRequest> = app
         .inbox_prs()
         .into_iter()
         .filter(|p| crate::views::overlays::pr_matches_search(p, &filter))
         .collect();
-    let linears: Vec<&crate::gql::LinearIssue> = app
-        .inbox_linears()
+    prs.sort_by(|a, b| {
+        (a.owner.as_str(), a.repo.as_str()).cmp(&(b.owner.as_str(), b.repo.as_str()))
+    });
+    prs
+}
+
+/// Linear issues in the order the inbox table displays them: filtered by
+/// the active search. The state sort from `inbox_linears` (active before
+/// terminal) is preserved — matching what `render` displays.
+fn inbox_display_linears(app: &App) -> Vec<&crate::gql::LinearIssue> {
+    let filter = match &app.mode {
+        Mode::Filter { input, .. } => input.clone(),
+        _ => app.filter.clone(),
+    };
+    app.inbox_linears()
         .into_iter()
         .filter(|l| crate::views::overlays::linear_matches_search(l, &filter))
-        .collect();
+        .collect()
+}
+
+pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+    let prs = inbox_display_prs(app);
+    let linears = inbox_display_linears(app);
 
     let pr_sync = app.sync_by_source("github");
     let pr_sync_label = sync_label(pr_sync, app.spinner, app.syncing.contains("github"));
@@ -89,14 +111,9 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     rows.push(group_header_row(&pr_header));
     row_idx += 1;
 
-    let mut sorted_prs: Vec<&crate::gql::PullRequest> = prs.clone();
-    sorted_prs.sort_by(|a, b| {
-        (a.owner.as_str(), a.repo.as_str()).cmp(&(b.owner.as_str(), b.repo.as_str()))
-    });
-
     let mut seen_closed = false;
     let mut current_repo: Option<(String, String)> = None;
-    for (i, pr) in sorted_prs.iter().enumerate() {
+    for (i, pr) in prs.iter().enumerate() {
         let repo_key = (pr.owner.clone(), pr.repo.clone());
         if current_repo.as_ref() != Some(&repo_key) {
             if current_repo.is_some() {
@@ -425,7 +442,7 @@ fn open_url(url: &str) {
 }
 
 pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
-    let total = app.inbox_prs().len() + app.inbox_linears().len();
+    let total = inbox_display_prs(app).len() + inbox_display_linears(app).len();
     match key {
         KeyCode::Char('j') | KeyCode::Down if app.cursor + 1 < total => {
             app.cursor += 1;
@@ -434,8 +451,8 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             app.cursor -= 1;
         }
         KeyCode::Char('C') => {
-            let prs = app.inbox_prs();
-            let linears = app.inbox_linears();
+            let prs = inbox_display_prs(app);
+            let linears = inbox_display_linears(app);
             if app.cursor < prs.len() {
                 app.spawn_todo_from_pr(prs[app.cursor].id, true);
             } else {
@@ -446,7 +463,7 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             }
         }
         KeyCode::Char('d') => {
-            let prs = app.inbox_prs();
+            let prs = inbox_display_prs(app);
             if app.cursor < prs.len() {
                 app.spawn_dismiss_pr(prs[app.cursor].id);
             }
@@ -456,7 +473,7 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             app.cursor = 0;
         }
         KeyCode::Char('s') => {
-            let prs = app.inbox_prs();
+            let prs = inbox_display_prs(app);
             if app.cursor < prs.len() {
                 app.spawn_sync_github();
             } else {
@@ -464,8 +481,8 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             }
         }
         KeyCode::Char('o') => {
-            let prs = app.inbox_prs();
-            let linears = app.inbox_linears();
+            let prs = inbox_display_prs(app);
+            let linears = inbox_display_linears(app);
             let url = if app.cursor < prs.len() {
                 Some(prs[app.cursor].url.clone())
             } else {
@@ -478,8 +495,8 @@ pub(crate) fn handle_navigate(app: &mut App, key: KeyCode) {
             }
         }
         KeyCode::Char('L') => {
-            let prs = app.inbox_prs();
-            let linears = app.inbox_linears();
+            let prs = inbox_display_prs(app);
+            let linears = inbox_display_linears(app);
             let mode = if app.cursor < prs.len() {
                 Some(Mode::LinkTodo {
                     pr_id: Some(prs[app.cursor].id),
@@ -1232,6 +1249,61 @@ mod navigate_tests {
         assert!(
             toast.message.contains("example.com"),
             "o should surface the PR url, got {:?}",
+            toast.message
+        );
+    }
+
+    #[test]
+    fn test_o_across_repos_opens_cursor_row_not_state_sorted() {
+        let pr_high = gql::PullRequest {
+            id: 778,
+            owner: "zzz".to_string(),
+            repo: "agent-api".to_string(),
+            number: 778,
+            title: "PR #778".to_string(),
+            url: "https://zzz/agent-api/778".to_string(),
+            author: None,
+            state: "open".to_string(),
+            review_requested: false,
+            changes_requested: false,
+            copilot_comments: false,
+            merge_conflicts: false,
+            authored_by_me: false,
+            approved: false,
+            actions_failing: false,
+            dismissed_at: None,
+            remote_updated_at: None,
+        };
+        let pr_low = gql::PullRequest {
+            id: 802,
+            owner: "aaa".to_string(),
+            repo: "other".to_string(),
+            number: 802,
+            title: "PR #802".to_string(),
+            url: "https://aaa/other/802".to_string(),
+            author: None,
+            state: "open".to_string(),
+            review_requested: false,
+            changes_requested: false,
+            copilot_comments: false,
+            merge_conflicts: false,
+            authored_by_me: false,
+            approved: false,
+            actions_failing: false,
+            dismissed_at: None,
+            remote_updated_at: None,
+        };
+        let mut app = App::default();
+        app.data.pulls = vec![pr_high.clone(), pr_low.clone()];
+        app.cursor = 1;
+
+        super::handle_navigate(&mut app, KeyCode::Char('o'));
+
+        let toast = app.toast.expect("o should raise a toast with the URL");
+        assert_eq!(toast.kind, ToastKind::Success);
+        assert!(
+            toast.message.contains("/778"),
+            "cursor on the repo-sorted second row should open that row's PR, got {:?}",
             toast.message
         );
     }
